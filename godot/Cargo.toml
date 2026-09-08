@@ -1,0 +1,21 @@
+[package]
+name = "godot"
+description = "Rust bindings for the Godot 4 game engine (GDExtension)."
+version = "0.1.0"
+license = "MIT"
+workspace = ".."
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[features]
+default = []
+double-precision = ["godot-core/double-precision", "godot-bindings/double-precision"]
+# Expose editor-only classes; do not enable for extensions shipped in exported projects.
+editor = ["godot-bindings/editor"]
+
+[dependencies]
+godot-core = { path = "../godot-core", version = "0.1.0" }
+godot-bindings = { path = "../godot-bindings", version = "0.1.0" }
+godot-macros = { path = "../godot-macros", version = "0.1.0" }
+godot-async = { path = "../godot-async", version = "0.1.0" }

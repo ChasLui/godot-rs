@@ -1,27 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
-    "gdnative",
-    "gdnative-async",
-    "gdnative-bindings",
-    "gdnative-core",
-    "gdnative-derive",
-    "gdnative-sys",
-    "test",
-    "bindings-generator",
+    "godot-sys",
+    "godot-core",
+    "godot-codegen",
+    "godot-bindings",
+    "godot-macros",
+    "godot-async",
+    "godot",
+    "itest",
     "examples/hello-world",
-    "examples/spinning-cube",
-    "examples/scene-create",
-    "examples/signals",
-    "examples/dodge-the-creeps",
-    "examples/resource",
-    "examples/native-plugin",
-    "examples/rpc",
-    "examples/builder-export",
-    "examples/property-export",
-    "examples/godot_tps_controller_port",
-    "impl/proc-macros"
+    "examples/counter",
 ]
-
-[profile.dev.package.miniserde]
-opt-level = 0

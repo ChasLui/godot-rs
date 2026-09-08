@@ -1,0 +1,13 @@
+[configuration]
+
+entry_symbol = "hello_world_init"
+compatibility_minimum = 4.7
+
+[libraries]
+
+macos.debug = "res://lib/libhello_world.dylib"
+macos.release = "res://lib/libhello_world.dylib"
+linux.debug.x86_64 = "res://lib/libhello_world.so"
+linux.release.x86_64 = "res://lib/libhello_world.so"
+windows.debug.x86_64 = "res://lib/hello_world.dll"
+windows.release.x86_64 = "res://lib/hello_world.dll"

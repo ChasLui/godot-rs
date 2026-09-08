@@ -46,7 +46,7 @@ Additionally, when opening a PR, our continuous integration (CI) pipeline will a
 
 Primary communication between developers of the project happens on the `godot-rust` Discord server. [Invite link here][godot-rust-discord].
 
-For questions about Godot, check out the options on the [Godot community page][godot-community]. For example, their Discord server hosts a `#gdnative-dev` channel for questions regarding GDNative interface. The contributor chat is helpful in case of discussions about Godot's own design and implementation.
+For questions about Godot, check out the options on the [Godot community page][godot-community]. For example, their Discord server hosts a `#godot-rust-dev` channel for questions regarding GDNative interface. The contributor chat is helpful in case of discussions about Godot's own design and implementation.
 
 If you are only interested in occasional announcements and showcases, follow [@GodotRust on Twitter][godot-rust-twitter]. For questions and design discussions, please use Discord.
 

@@ -1,0 +1,23 @@
+[package]
+name = "godot-sys"
+description = "Internal FFI bindings to the Godot 4 GDExtension C API (see the godot crate)."
+version = "0.1.0"
+build = "build.rs"
+license = "MIT"
+workspace = ".."
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[features]
+default = []
+# Build against a Godot binary compiled with `precision=double`.
+double-precision = []
+
+[build-dependencies]
+bindgen = { version = "0.69.0", default-features = false, features = ["runtime"] }
+proc-macro2 = "1"
+quote = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

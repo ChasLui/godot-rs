@@ -1,111 +1,105 @@
-# Minimal CI workflow
-# Run when someone opens a PR and adds commits to the PR (this is recognized as a push to master)
-# Includes basic checks and unit/integration checks on Linux only
+# Runs on every push and pull request.
+#
+# The integration tests need a real Godot binary, so the engine is downloaded rather than
+# mocked: a binding is only correct if the engine agrees, and nothing short of running it
+# proves that.
 
-name: Minimal CI
-
-env:
-  # Local variables
-  # Note: using variables is limited at the moment, see https://github.com/actions/runner/issues/480
-  GODOT_VER: "3.5.1-stable"
-
-  # Don't use more features like "gdnative_bindings_generator/debug" to keep CI truly minimal
-  GDRUST_FEATURES: "gdnative/async,gdnative/serde"
-
-  RIPGREP_VERSION: "13.0.0"
+name: CI
 
 on:
+  push:
+    branches: [master]
   pull_request:
-    branches:
-      - master
+    branches: [master]
+
+env:
+  CARGO_TERM_COLOR: always
+  # Must match godot-sys/gdextension/VERSION; the bindings are generated against this dump.
+  GODOT_VERSION: 4.7.2
 
 defaults:
   run:
     shell: bash
 
-# If a new commit is pushed before the old one's CI has completed (on the same branch), abort previous run
-concurrency:
-  group: ${{ github.head_ref }}
-  cancel-in-progress: true
-
 jobs:
-  rustfmt:
+  lint:
+    name: format and clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: "Install Rust"
-        uses: ./.github/composite/rust
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          rust: stable
-          components: rustfmt
-      - name: "Check rustfmt"
-        run: cargo fmt --all -- --check
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all -- --check
+      - run: |
+          cargo clippy --workspace -- \
+            -D clippy::style -D clippy::complexity -D clippy::perf \
+            -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings
 
-  clippy:
-    runs-on: ubuntu-latest
-    continue-on-error: ${{ matrix.rust == 'nightly' }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: "Install Rust"
-        uses: ./.github/composite/rust
-        with:
-          rust: stable
-          components: clippy
-      - name: "Check clippy"
-        run: cargo clippy --workspace --features ${GDRUST_FEATURES} -- -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings
-
-  check-todo:
+  unit-tests:
+    name: unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: "Install ripgrep"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  integration-tests:
+    name: integration tests (Godot ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            godot_platform: linux.x86_64
+            lib: libitest.so
+          - os: macos-latest
+            godot_platform: macos.universal
+            lib: libitest.dylib
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Download Godot ${{ env.GODOT_VERSION }}
         run: |
-          cd /tmp
-          wget --no-verbose https://github.com/BurntSushi/ripgrep/releases/download/${RIPGREP_VERSION}/ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl.tar.gz -O ripgrep.tar.gz
-          tar -zxvf ripgrep.tar.gz
-          sudo mv ripgrep-${RIPGREP_VERSION}-x86_64-unknown-linux-musl/rg /usr/bin
-      - name: "Look for TODO comments without issue numbers attached to them"
-        run: bash tools/detect-todo.sh
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_${{ matrix.godot_platform }}.zip"
+          curl -L -o godot.zip "$url"
+          unzip -q godot.zip -d godot-bin
+          if [[ "${{ matrix.os }}" == macos-* ]]; then
+            echo "GODOT4_BIN=$PWD/godot-bin/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+          else
+            binary=$(find godot-bin -maxdepth 1 -type f -name 'Godot_v*')
+            chmod +x "$binary"
+            echo "GODOT4_BIN=$PWD/$binary" >> "$GITHUB_ENV"
+          fi
 
-  unit-test:
+      - name: Verify the engine matches the vendored API dump
+        run: |
+          expected=$(cut -d. -f1-3 < godot-sys/gdextension/VERSION)
+          actual=$("$GODOT4_BIN" --headless --version | cut -d. -f1-3)
+          if [[ "$expected" != "$actual" ]]; then
+            echo "engine is $actual but the bindings were generated from $expected"
+            exit 1
+          fi
+
+      - name: Build the test extension
+        run: cargo build -p itest
+
+      - name: Run integration tests
+        run: ./check.sh itest
+
+      - name: Run editor-mode tests
+        run: ./check.sh etest
+
+  examples:
+    name: examples build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: "Install Rust"
-        uses: ./.github/composite/rust
-      - name: "Compile tests"
-        run: cargo test --workspace --features ${GDRUST_FEATURES} --no-run
-      - name: "Test"
-        run: cargo test --workspace --features ${GDRUST_FEATURES}
-
-  integration-test-godot:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: "Run Godot integration test"
-        uses: ./.github/composite/godot
-        with:
-          godot_ver: ${{ env.GODOT_VER }}
-
-
-  # ---------------------------------------------------------------------------------------------------------------------------------------------
-  # CI status report
-
-  # Job to notify merge queue about success/failure. Named the same as the one in full-ci.
-  ci-status:
-    if: always()
-    needs:
-      - rustfmt
-      - clippy
-      - check-todo
-      - unit-test
-      - integration-test-godot
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Success"
-        if: ${{ !(contains(needs.*.result, 'failure')) }}
-        run: exit 0
-
-      - name: "Failure"
-        if: ${{ contains(needs.*.result, 'failure') }}
-        run: exit 1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p hello-world -p counter

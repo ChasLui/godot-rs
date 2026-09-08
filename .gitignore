@@ -6,14 +6,15 @@
 target
 */target
 *.rlib
-**/Cargo.lock
 
-# Godot
-# ignore all files in test/project/lib/, except the .gitkeep as the directory should still be there
-test/project/lib/*
-!test/project/lib/.gitkeep
+# Godot's per-project cache and import data; regenerated on first open.
+.godot/
 **/.import/*
 /logs
+
+# Compiled extensions copied into the Godot projects. The directories themselves are kept.
+**/godot/lib/*
+!**/godot/lib/.gitkeep
 
 # OS-specific
 .DS_Store

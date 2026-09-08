@@ -1,0 +1,13 @@
+[configuration]
+
+entry_symbol = "counter_init"
+compatibility_minimum = 4.7
+
+[libraries]
+
+macos.debug = "res://lib/libcounter.dylib"
+macos.release = "res://lib/libcounter.dylib"
+linux.debug.x86_64 = "res://lib/libcounter.so"
+linux.release.x86_64 = "res://lib/libcounter.so"
+windows.debug.x86_64 = "res://lib/counter.dll"
+windows.release.x86_64 = "res://lib/counter.dll"

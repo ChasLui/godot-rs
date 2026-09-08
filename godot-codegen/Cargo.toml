@@ -1,0 +1,15 @@
+[package]
+name = "godot-codegen"
+description = "Generates Rust bindings from Godot's extension_api.json."
+version = "0.1.0"
+license = "MIT"
+workspace = ".."
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[dependencies]
+proc-macro2 = "1"
+quote = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

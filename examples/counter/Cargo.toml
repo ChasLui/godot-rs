@@ -1,6 +1,6 @@
 [package]
-name = "hello-world"
-description = "The smallest possible Godot 4 extension."
+name = "counter"
+description = "Properties, signals and frame-driven async in one Godot 4 extension."
 version = "0.1.0"
 license = "MIT"
 edition = "2021"

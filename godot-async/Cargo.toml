@@ -1,0 +1,12 @@
+[package]
+name = "godot-async"
+description = "Frame-driven async support for Godot 4 extensions."
+version = "0.1.0"
+license = "MIT"
+workspace = ".."
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[dependencies]
+godot-core = { path = "../godot-core", version = "0.1.0" }

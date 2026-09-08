@@ -1,69 +1,70 @@
 #!/bin/bash
 
-# Small utility to run tests locally
-# Similar to minimal-ci
+# Local checker, mirroring CI.
+# Usage: ./check.sh [fmt] [clippy] [test] [itest]
 
-# No args specified: do everything
+set -o pipefail
+
 if [ "$#" -eq 0 ]; then
-    args=("fmt" "clippy" "test" "itest")
+    args=("fmt" "clippy" "test" "itest" "etest")
 else
     args=("$@")
 fi
 
-# --help menu
 for arg in "${args[@]}"; do
     if [ "$arg" == "--help" ]; then
         echo "Usage: check.sh [<commands>]"
         echo ""
-        echo "Each specified command will be run (until one fails)."
-        echo "If no commands are specified, all checks are run (no doc; may take several minutes)."
+        echo "Each specified command runs until one fails."
+        echo "With no commands, all checks run."
         echo ""
         echo "Commands:"
         echo "    fmt           format code, fail if bad"
         echo "    clippy        validate clippy lints"
         echo "    test          run unit tests (no Godot)"
-        echo "    itest         run integration tests (Godot)"
-        echo "    doc           generate docs for 'gdnative' crate"
-        echo "    dok           generate docs and open in browser"
-        echo ""
-        echo "Examples:"
-        echo "    check.sh fmt clippy"
-        echo "    check.sh"
+        echo "    itest         run integration tests (needs Godot 4)"
+        echo "    etest         run the editor-mode integration test"
+        echo "    doc           generate docs for the 'godot' crate"
         exit 0
     fi
 done
 
-# For integration tests
+# Godot 4 binary used by the integration tests.
 function findGodot() {
-    # User-defined GODOT_BIN
-    if [ -n "$GODOT_BIN" ]; then
-        echo "Found GODOT_BIN env var ($GODOT_BIN)"
-        godotBin="$GODOT_BIN"
-
-    #  Executable in path
+    if [ -n "$GODOT4_BIN" ]; then
+        godotBin="$GODOT4_BIN"
+    elif [ -x "/Applications/Godot.app/Contents/MacOS/Godot" ]; then
+        godotBin="/Applications/Godot.app/Contents/MacOS/Godot"
+    elif command -v godot4 &>/dev/null; then
+        godotBin="godot4"
     elif command -v godot &>/dev/null; then
-        echo "Found 'godot' executable"
         godotBin="godot"
-
-    # Special case for Windows when there is a .bat file
-    # Also consider that 'cmd /c' would need 'cmd //c' (https://stackoverflow.com/q/21357813)
-    elif
-        # Godot returns 255 for older versions, but 0 for newer ones
-        godot.bat --version
-        [[ $? -eq 255 || $? -eq 0 ]]
-    then
-        echo "Found 'godot.bat' script"
-        godotBin="godot.bat"
-
-    # Error case
     else
-        echo "Godot executable not found"
+        echo "Godot 4 executable not found; set GODOT4_BIN"
         exit 2
     fi
+    echo "Using Godot: $godotBin"
 }
 
-features="gdnative/async,gdnative/serde"
-itest_toggled_features="gdnative/inventory,no-manual-register"
+# The dynamic library extension differs per platform; the .gdextension lists all of them.
+function libName() {
+    case "$(uname -s)" in
+        Darwin) echo "libitest.dylib" ;;
+        Linux)  echo "libitest.so" ;;
+        *)      echo "itest.dll" ;;
+    esac
+}
+
+# Runs Godot as an editor, where an EditorPlugin asserts the editor half of the init-level
+# gate. Godot exits 0 even when a plugin prints errors, so the success marker in the output is
+# what decides, not the exit code.
+function runEditorTest() {
+    local output
+    output=$("$godotBin" --headless --path itest/godot --editor --quit 2>&1)
+    echo "$output" | grep -E "itest-editor"
+    echo "$output" | grep -q "itest-editor: OK"
+}
+
 cmds=()
 
 for arg in "${args[@]}"; do
@@ -72,25 +73,29 @@ for arg in "${args[@]}"; do
         cmds+=("cargo fmt --all -- --check")
         ;;
     clippy)
-        cmds+=("cargo clippy --workspace --features $features -- -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings")
+        cmds+=("cargo clippy --workspace -- -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings")
         ;;
     test)
-        cmds+=("cargo test --features $features")
+        cmds+=("cargo test --workspace")
         ;;
     itest)
         findGodot
-        cmds+=("cargo build --manifest-path test/Cargo.toml --features $features")
-        cmds+=("cp target/debug/*gdnative_test* test/project/lib/")
-        cmds+=("$godotBin --path test/project")
-        cmds+=("cargo build --manifest-path test/Cargo.toml --features $features,$itest_toggled_features")
-        cmds+=("cp target/debug/*gdnative_test* test/project/lib/")
-        cmds+=("$godotBin --path test/project")
+        lib=$(libName)
+        target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+        cmds+=("cargo build -p itest")
+        cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
+        cmds+=("$godotBin --headless --path itest/godot")
+        ;;
+    etest)
+        findGodot
+        lib=$(libName)
+        target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+        cmds+=("cargo build -p itest")
+        cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
+        cmds+=("runEditorTest")
         ;;
     doc)
-        cmds+=("cargo doc --lib -p gdnative --no-deps --features $features")
-        ;;
-    dok)
-        cmds+=("cargo doc --lib -p gdnative --no-deps --features $features --open")
+        cmds+=("cargo doc --lib -p godot --no-deps")
         ;;
     *)
         echo "Unrecognized command '$arg'"

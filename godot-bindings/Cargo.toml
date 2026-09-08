@@ -1,0 +1,24 @@
+[package]
+name = "godot-bindings"
+description = "Generated Godot 4 class bindings (see the godot crate)."
+version = "0.1.0"
+build = "build.rs"
+license = "MIT"
+workspace = ".."
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[features]
+default = []
+double-precision = ["godot-core/double-precision"]
+# Generate editor-only classes (EditorPlugin, EditorInterface, ...).
+# An extension using these will not load in an exported project.
+editor = []
+
+[dependencies]
+godot-core = { path = "../godot-core", version = "0.1.0" }
+godot-sys = { path = "../godot-sys", version = "0.1.0" }
+
+[build-dependencies]
+godot-codegen = { path = "../godot-codegen", version = "0.1.0" }
