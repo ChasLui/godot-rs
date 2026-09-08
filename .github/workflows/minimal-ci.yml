@@ -11,6 +11,9 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Lets a run be started by hand, which is how the engine-download steps get
+  # re-checked when a new Godot patch release appears.
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
