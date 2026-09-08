@@ -1,5 +1,9 @@
 # godot-rust for Godot 4 (GDExtension)
 
+[![CI](https://github.com/ChasLui/godot-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/ChasLui/godot-rs/actions/workflows/ci.yml)
+[![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE.md)
+
 Rust bindings for the [Godot 4](https://godotengine.org) game engine, built on GDExtension.
 
 > [!Note]
