@@ -2,19 +2,18 @@
 
 Rust bindings for the [Godot 4](https://godotengine.org) game engine, built on GDExtension.
 
-> [!Important]
-> **This is a from-scratch rewrite of a fork, not the official Godot 4 binding.**
+> [!Note]
+> **History.** This repository began as a fork of
+> [`godot-rust/gdnative`](https://github.com/godot-rust/gdnative), which targeted Godot 3 and is no
+> longer maintained. Godot 4 replaced GDNative with GDExtension — a different ABI, not a different
+> API — so the Godot 4 support here is a rewrite rather than a port; none of the Godot 3 code
+> survived. The last Godot 3 state is preserved at the tag `gdnative-final-0.11.3`.
 >
-> This repository began as a fork of [`godot-rust/gdnative`](https://github.com/godot-rust/gdnative),
-> which targeted Godot 3 and is no longer maintained. Godot 4 replaced GDNative with GDExtension —
-> a different ABI, not a different API — so none of the Godot 3 code survived.
->
-> **If you want a production-ready Rust binding for Godot 4, use
-> [`godot-rust/gdext`](https://github.com/godot-rust/gdext).** It is actively maintained, far more
-> complete, and is what the godot-rust project recommends. This repository exists as a smaller,
-> self-contained implementation; see [Scope](#scope) for exactly what it does and does not do.
->
-> The last Godot 3 state is preserved at the tag `gdnative-final-0.11.3`.
+> **Related work.** [`godot-rust/gdext`](https://github.com/godot-rust/gdext) is the godot-rust
+> project's own Godot 4 binding, and covers considerably more of the engine API. This repository is
+> an independent, deliberately smaller implementation: a compact codebase you can read end to end,
+> with every feature verified against a real engine. [Scope](#scope) lists exactly what is and is
+> not implemented.
 
 ## Supported Godot version
 
