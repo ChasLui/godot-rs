@@ -129,6 +129,9 @@ cp target/debug/libcounter.dylib examples/counter/godot/lib/
 godot --path examples/counter/godot
 ```
 
+The first run has to scan the project before Godot picks up the `.gdextension`; opening it in the
+editor once does that. `check.sh` handles this automatically for the test project.
+
 ## Scope
 
 Built and covered by the integration tests:
@@ -173,8 +176,9 @@ path a user's code takes.
 
 Running `godot --headless --import` (or `--headless --editor`) on a project that registers a
 `Node`-derived exposed class **for the first time** crashes Godot 4.7.2 after the scan completes.
-The import itself succeeds — the `.godot` directory is written correctly and everything works
-afterwards.
+The scan itself succeeds — the `.godot` directory is written correctly and everything works
+afterwards, which is why `check.sh` ignores the exit code of that first scan and checks for
+`.godot/` instead.
 
 Opening the project in the GUI editor does not crash, so the normal workflow is unaffected. The
 crash backtrace is entirely inside the engine, with no frames from this library; it does not

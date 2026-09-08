@@ -55,6 +55,28 @@ function libName() {
     esac
 }
 
+# A Godot project only picks up a .gdextension once its filesystem has been scanned, and the
+# resulting .godot/ directory is not committed. A fresh clone (or CI) therefore has to scan
+# once before any test can find the registered classes.
+#
+# The scan is done through the editor rather than --import: on 4.7.2 both crash after finishing
+# on a project that registers a Node-derived exposed class (see README), so the exit code is
+# ignored and the result is checked by looking for .godot/ instead.
+function ensureImported() {
+    local proj="$1"
+    if [ -d "$proj/.godot" ]; then
+        return 0
+    fi
+
+    echo "First run: scanning $proj (Godot 4.7.2 may crash after the scan; the scan still completes)"
+    "$godotBin" --headless --path "$proj" --editor --quit >/dev/null 2>&1 || true
+
+    if [ ! -d "$proj/.godot" ]; then
+        echo "Godot did not produce $proj/.godot; the project could not be scanned"
+        return 1
+    fi
+}
+
 # Runs Godot as an editor, where an EditorPlugin asserts the editor half of the init-level
 # gate. Godot exits 0 even when a plugin prints errors, so the success marker in the output is
 # what decides, not the exit code.
@@ -84,6 +106,7 @@ for arg in "${args[@]}"; do
         target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
         cmds+=("cargo build -p itest")
         cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
+        cmds+=("ensureImported itest/godot")
         cmds+=("$godotBin --headless --path itest/godot")
         ;;
     etest)
@@ -92,6 +115,7 @@ for arg in "${args[@]}"; do
         target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
         cmds+=("cargo build -p itest")
         cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
+        cmds+=("ensureImported itest/godot")
         cmds+=("runEditorTest")
         ;;
     doc)
