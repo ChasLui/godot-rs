@@ -132,7 +132,7 @@ windows.debug.x86_64 = "res://lib/my_library.dll"
 | [`examples/hello-world`](examples/hello-world) | The smallest working extension |
 | [`examples/counter`](examples/counter) | Properties, signals, and frame-driven async |
 | [`examples/bouncing-ball`](examples/bouncing-ball) | A game loop: physics, custom drawing, input and signals together |
-| [`examples/editor-plugin`](examples/editor-plugin) | An `EditorPlugin` in Rust, added without a `plugin.cfg` |
+| [`examples/editor-plugin`](examples/editor-plugin) | An `EditorPlugin` in Rust with a dock panel, added without a `plugin.cfg` |
 
 Build and run one:
 
@@ -224,17 +224,13 @@ Built and covered by the integration tests:
   permits it in an editor build.
 - Editor plugins: a Rust class descending from `EditorPlugin` is added with
   `editor::add_editor_plugin`, which takes a class name and nothing else -- no `plugin.cfg`, no
-  script file, no `addons/` directory. Editor classes come with the `editor` feature.
+  script file, no `addons/` directory. Editor classes come with the `editor` feature, and the
+  plugin can add controls to the editor's docks like any other.
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
-- Adding controls to the editor's interface. `add_control_to_dock` and `add_control_to_container`
-  crash the engine and the cause is not yet found -- ruled out so far: the plugin's own handle
-  (a no-argument call works), object arguments (`remove_control_from_docks` works), enum argument
-  width (`int64_t` on both sides), call timing (`_enter_tree` and `_ready` alike) and cleanup
-  order (it crashes with no cleanup at all). Everything else about editor plugins works.
 - Object parameters that are optional in Godot are generated as required, so a method like
   `add_control_to_dock` has no way to pass the null its `shortcut` argument defaults to
 - Windows, Android and iOS are not covered by CI

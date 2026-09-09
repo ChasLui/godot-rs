@@ -37,6 +37,21 @@ fn refcount_methods() -> &'static RefCountMethods {
     })
 }
 
+/// Godot's `Object::NOTIFICATION_POSTINITIALIZE`.
+const NOTIFICATION_POSTINITIALIZE: i32 = 0;
+
+/// `Object::notification`, resolved once.
+fn object_notification() -> &'static crate::ptrcall::MethodBind {
+    static METHOD: std::sync::OnceLock<crate::ptrcall::MethodBind> = std::sync::OnceLock::new();
+    METHOD.get_or_init(|| unsafe {
+        crate::ptrcall::MethodBind::resolve(
+            "Object",
+            "notification",
+            sys::method_hashes::OBJECT_NOTIFICATION,
+        )
+    })
+}
+
 /// An engine class, either built into Godot or registered by an extension.
 ///
 /// # Safety
@@ -108,6 +123,18 @@ impl<T: GodotObject> Gd<T> {
                 // ClassDB hands back a RefCounted with a zero count; `init_ref` takes the first.
                 let _: bool = refcount_methods().init_ref.ptrcall(ptr, &[]);
             }
+
+            // `classdb_construct_object` builds the object but does not finish it -- the
+            // interface header says NOTIFICATION_POSTINITIALIZE "must be sent after
+            // construction". Skipping it leaves an object that answers ordinary method calls
+            // perfectly well and crashes the engine the moment something takes it seriously:
+            // handing a Control to the editor was where this surfaced.
+            let reversed = false;
+            let args: [sys::GDExtensionConstTypePtr; 2] = [
+                &NOTIFICATION_POSTINITIALIZE as *const i32 as sys::GDExtensionConstTypePtr,
+                &reversed as *const bool as sys::GDExtensionConstTypePtr,
+            ];
+            object_notification().ptrcall_void(ptr, &args);
 
             Some(gd)
         }

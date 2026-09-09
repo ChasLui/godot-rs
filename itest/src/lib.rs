@@ -658,6 +658,36 @@ impl RustTestNode {
     }
 
     /// Whether the engine sent the given notification, and what `_set` last stored.
+    /// Adds a freshly built engine object to the live scene tree.
+    ///
+    /// `classdb_construct_object` builds an object but leaves it to the caller to send
+    /// NOTIFICATION_POSTINITIALIZE, which the interface header requires. An object that never
+    /// receives it answers ordinary method calls perfectly well -- it can be constructed, have
+    /// its text set and read back, and be parented to a node that is *outside* the tree. It
+    /// dies the moment the engine takes it seriously, which for a Node means entering the tree
+    /// and being sent NOTIFICATION_ENTER_TREE.
+    ///
+    /// So this parents a new Control to a node that is already in the tree, which is the
+    /// smallest thing that segfaults when the notification is skipped. Returning at all is the
+    /// assertion; there is no wrong value to check for.
+    #[func]
+    fn fresh_object_survives_the_tree(&mut self) -> bool {
+        let Some(this) = (unsafe { Gd::<classes::Node>::from_obj_ptr(self.base) }) else {
+            return false;
+        };
+        let Some(label) = Gd::<classes::Label>::new() else {
+            return false;
+        };
+
+        this.add_child(label.upcast_ref());
+        let entered = label.clone().is_inside_tree();
+        this.remove_child(label.upcast_ref());
+        // SAFETY: removed from the tree, and this is the only handle left.
+        unsafe { label.free() };
+
+        entered
+    }
+
     #[func]
     fn notification_seen(&mut self, what: i64) -> bool {
         self.notifications.contains(&(what as i32))

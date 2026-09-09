@@ -105,6 +105,12 @@ func test_virtuals() -> void:
 	check(leaked < 1_000_000,
 		"the virtual return path leaked %s bytes over 200k calls" % leaked)
 
+	# An object built by Gd::new must be finished, not merely constructed: the interface
+	# requires NOTIFICATION_POSTINITIALIZE after construction, and an object that never got it
+	# behaves normally right up until the engine puts it in the tree.
+	check(virtual_node.fresh_object_survives_the_tree(),
+		"a freshly constructed Control did not survive entering the scene tree")
+
 	# _notification has its own slot in the creation info. NOTIFICATION_ENTER_TREE fires when
 	# the node is added, so by now the engine must have sent it.
 	check(virtual_node.notification_seen(Node.NOTIFICATION_ENTER_TREE),

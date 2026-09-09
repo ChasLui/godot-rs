@@ -113,8 +113,21 @@ mod builtin_sizes {
             .unwrap_or_else(|| panic!("ClassDB::{wanted} has no hash"));
         let ident = format_ident!("CLASSDB_{}", wanted.to_uppercase());
 
+        let object = api
+            .classes
+            .iter()
+            .find(|c| c.name == "Object")
+            .expect("Object missing from extension_api.json");
+        let notification = object
+            .methods
+            .iter()
+            .find(|m| m.name == "notification")
+            .expect("Object::notification missing from extension_api.json");
+        let notification_hash = notification.hash.expect("Object::notification has no hash");
+
         quote! {
             pub const #ident: i64 = #hash;
+            pub const OBJECT_NOTIFICATION: i64 = #notification_hash;
         }
     }
 
