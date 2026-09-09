@@ -5,9 +5,24 @@ extends Node
 
 var failures: Array[String] = []
 
+# A GDScript runtime error (accessing a property that does not exist, calling a missing method)
+# aborts the enclosing function without aborting the script. Every later assertion in that
+# function is then silently skipped, and an empty `failures` list reads as success.
+#
+# Each test therefore records that it ran to completion, and `report` fails if any is missing.
+var completed: Array[String] = []
+const EXPECTED_TESTS := [
+	"class_registration", "variant_roundtrip", "engine_calls", "object_lifecycle",
+	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
+	"math_builtins", "collections", "instance_state", "virtuals",
+]
+
 func check(condition: bool, message: String) -> void:
 	if not condition:
 		failures.append(message)
+
+func done(name: String) -> void:
+	completed.append(name)
 
 func _ready() -> void:
 	test_class_registration()
@@ -29,6 +44,10 @@ func _ready() -> void:
 	report()
 
 func report() -> void:
+	for name in EXPECTED_TESTS:
+		if not completed.has(name):
+			failures.append("test '%s' did not run to completion (a script error aborted it)" % name)
+
 	if failures.is_empty():
 		print("itest: OK")
 		get_tree().quit(0)
@@ -46,7 +65,7 @@ func start_virtual_test() -> void:
 	add_child(virtual_node)
 	# Let a handful of frames pass before reading the counters.
 	await get_tree().create_timer(0.25).timeout
-	test_virtuals()
+	await test_virtuals()
 	report()
 
 func test_virtuals() -> void:
@@ -67,24 +86,44 @@ func test_virtuals() -> void:
 		check(int(extra[0]) == 1, "_enter_tree fired %s times, expected 1" % extra[0])
 		check(int(extra[1]) == 0, "_exit_tree fired %s times before removal, expected 0" % extra[1])
 
+	# _notification has its own slot in the creation info. NOTIFICATION_ENTER_TREE fires when
+	# the node is added, so by now the engine must have sent it.
+	check(virtual_node.notification_seen(Node.NOTIFICATION_ENTER_TREE),
+		"NOTIFICATION_ENTER_TREE was never delivered to _notification")
+	check(not virtual_node.notification_seen(999999),
+		"_notification reported a notification the engine never sent")
+
+	# Dynamic properties: _get answers names the class never registered, _set consumes one.
+	check(virtual_node.dynamic_speed == "got:speed",
+		"_get did not answer a dynamic property, got %s" % virtual_node.dynamic_speed)
+	virtual_node.dynamic_sink = 77
+	check(virtual_node.dynamic_sink_value() == 77,
+		"_set did not receive the value, got %d" % virtual_node.dynamic_sink_value())
+
 	# A virtual with a return value, reached through Godot's own str().
 	check(str(virtual_node) == "RustTestNode!",
 		"_to_string returned %s" % str(virtual_node))
 
 	await test_async()
 
+	# Removing from the tree must fire _exit_tree, proving the counter tracks real events.
+	remove_child(virtual_node)
+	var after: PackedStringArray = str(virtual_node.extra_virtual_counts()).split(",")
+	check(int(after[1]) == 1, "_exit_tree fired %s times after removal, expected 1" % after[1])
+
 	virtual_node.free()
+	done("virtuals")
 
 func test_async() -> void:
-	# The future advances one step per frame, driven from the node's _process. Watching it move
-	# across real frames is the point: a future that completed instantly would also "work".
+	# The future advances one step per frame, driven from the node's _process.
 	check(virtual_node.spawn_frame_counter(3) == 1, "future was not queued")
 
-	await get_tree().process_frame
-	await get_tree().process_frame
-	var midway: int = virtual_node.async_progress()
-	check(midway > 0, "future never advanced")
-	check(midway < 3, "future advanced too fast; it is not waiting per frame (got %d)" % midway)
+	# Checked immediately, before any frame has passed: a future that ran to completion inside
+	# spawn would already show progress here. This is what rules out synchronous execution,
+	# without depending on exactly when _process runs relative to `await process_frame`.
+	check(virtual_node.async_progress() == 0,
+		"future made progress before any frame passed, so it is not frame-driven (got %d)"
+			% virtual_node.async_progress())
 
 	await get_tree().create_timer(0.25).timeout
 	check(virtual_node.async_progress() == -3,
@@ -93,6 +132,7 @@ func test_async() -> void:
 func test_class_registration() -> void:
 	check(ClassDB.class_exists("RustTestNode"), "ClassDB does not know RustTestNode")
 	check(ClassDB.is_parent_class("RustTestNode", "Node"), "RustTestNode does not inherit Node")
+	done("class_registration")
 
 func test_variant_roundtrip() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
@@ -120,6 +160,7 @@ func test_variant_roundtrip() -> void:
 	check(n.echo_int("not an int") == null, "echo_int(wrong type) should be null")
 
 	n.free()
+	done("variant_roundtrip")
 
 func test_engine_calls() -> void:
 	# The Rust side calls the same engine API through the generated bindings; comparing against
@@ -140,6 +181,7 @@ func test_engine_calls() -> void:
 	check(n.node_name_roundtrip("节点") == "节点", "Node name round trip (non-ascii)")
 
 	n.free()
+	done("engine_calls")
 
 func test_object_lifecycle() -> void:
 	# Repeated create/call/free. A ptrcall that corrupts memory typically survives the first
@@ -155,6 +197,7 @@ func test_object_lifecycle() -> void:
 		check(n.probe_new_set_free() == true, "probe_new_set_free iteration %d" % i)
 
 	n.free()
+	done("object_lifecycle")
 
 func test_properties() -> void:
 	# Properties go through the engine's own property system, not the method call path:
@@ -175,6 +218,7 @@ func test_properties() -> void:
 	check(names.has("label"), "property 'label' missing from get_property_list()")
 
 	n.free()
+	done("properties")
 
 var signal_payloads: Array = []
 
@@ -194,6 +238,7 @@ func test_signals() -> void:
 		"signal payloads were %s, expected [1, 2]" % [signal_payloads])
 
 	n.free()
+	done("signals")
 
 func _on_counter_changed(new_value: int) -> void:
 	signal_payloads.append(new_value)
@@ -212,6 +257,7 @@ func test_rust_side_connect() -> void:
 		"signal argument was %d, expected the second emit's 8" % n.last_signal_value())
 
 	n.free()
+	done("rust_side_connect")
 
 func test_init_levels() -> void:
 	# Godot runs the Editor init level during a game run too, so a class must be gated on
@@ -228,6 +274,7 @@ func test_init_levels() -> void:
 	check(n != null and n.marker() == 2, "runtime-only class did not work")
 	if n != null:
 		n.free()
+	done("init_levels")
 
 func test_math_builtins() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
@@ -246,6 +293,7 @@ func test_math_builtins() -> void:
 		"Vector3.cross computed in Rust")
 
 	n.free()
+	done("math_builtins")
 
 func test_collections() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
@@ -325,6 +373,7 @@ func test_collections() -> void:
 	check(n.collection_churn(20) == 60, "collection churn, got %d" % n.collection_churn(20))
 
 	n.free()
+	done("collections")
 
 func test_reference_counting() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
@@ -339,6 +388,7 @@ func test_reference_counting() -> void:
 			"object survived its last reference (iteration %d)" % i)
 
 	n.free()
+	done("reference_counting")
 
 func test_instance_state() -> void:
 	var a: Object = ClassDB.instantiate("RustTestNode")
@@ -351,3 +401,4 @@ func test_instance_state() -> void:
 
 	a.free()
 	b.free()
+	done("instance_state")

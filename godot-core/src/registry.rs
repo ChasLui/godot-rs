@@ -24,13 +24,33 @@ pub trait GodotClass: Sized + 'static {
     /// Declares exported methods. Called once, right after the class itself is registered.
     fn register_methods() {}
 
-    /// Godot's `_to_string`.
-    ///
-    /// Not part of the generic virtual dispatch: a handful of hooks have their own field in
-    /// `GDExtensionClassCreationInfo6` and are never asked for by name -- `_to_string`,
-    /// `_notification`, `_get`/`_set`. Returning `None` leaves Godot's default representation.
+    // The hooks below have their own fields in `GDExtensionClassCreationInfo6` and are never
+    // requested by name, so they do not go through `virtual_trampoline`.
+
+    /// Godot's `_to_string`. Returning `None` leaves Godot's default representation.
     fn godot_to_string(&mut self) -> Option<crate::builtin::GString> {
         None
+    }
+
+    /// Godot's `_notification`.
+    ///
+    /// `what` is one of the `NOTIFICATION_*` constants; `reversed` is set while the engine walks
+    /// the tree in reverse, which it does for exit-style notifications.
+    fn godot_notification(&mut self, _what: i32, _reversed: bool) {}
+
+    /// Godot's `_get`: reads a property the class handles dynamically.
+    ///
+    /// Returning `None` means "not mine", and the engine falls back to the registered
+    /// properties.
+    fn godot_get(&mut self, _property: &str) -> Option<crate::builtin::Variant> {
+        None
+    }
+
+    /// Godot's `_set`: writes a property the class handles dynamically.
+    ///
+    /// Returns whether the write was handled; `false` lets the engine try elsewhere.
+    fn godot_set(&mut self, _property: &str, _value: &crate::builtin::Variant) -> bool {
+        false
     }
 
     /// Resolves a virtual method Godot asks for, by its engine name (`"_ready"`, `"_input"`).
@@ -192,6 +212,54 @@ unsafe extern "C" fn to_string<T: GodotClass>(
     }
 }
 
+unsafe extern "C" fn notification<T: GodotClass>(
+    instance: sys::GDExtensionClassInstancePtr,
+    what: i32,
+    reversed: sys::GDExtensionBool,
+) {
+    if instance.is_null() {
+        return;
+    }
+    let this = &mut *(instance as *mut T);
+    this.godot_notification(what, reversed != 0);
+}
+
+unsafe extern "C" fn get_property<T: GodotClass>(
+    instance: sys::GDExtensionClassInstancePtr,
+    name: sys::GDExtensionConstStringNamePtr,
+    ret: sys::GDExtensionVariantPtr,
+) -> sys::GDExtensionBool {
+    if instance.is_null() {
+        return false as sys::GDExtensionBool;
+    }
+    let this = &mut *(instance as *mut T);
+    let name = StringName::from_sys_copy(name).to_rust_string();
+
+    match this.godot_get(&name) {
+        Some(value) => {
+            // The engine's slot is uninitialized and takes ownership of what is written.
+            value.move_into(ret);
+            true as sys::GDExtensionBool
+        }
+        None => false as sys::GDExtensionBool,
+    }
+}
+
+unsafe extern "C" fn set_property<T: GodotClass>(
+    instance: sys::GDExtensionClassInstancePtr,
+    name: sys::GDExtensionConstStringNamePtr,
+    value: sys::GDExtensionConstVariantPtr,
+) -> sys::GDExtensionBool {
+    if instance.is_null() {
+        return false as sys::GDExtensionBool;
+    }
+    let this = &mut *(instance as *mut T);
+    let name = StringName::from_sys_copy(name).to_rust_string();
+    let value = crate::builtin::Variant::from_sys_copy(value);
+
+    this.godot_set(&name, &value) as sys::GDExtensionBool
+}
+
 /// Registers `T` with Godot's ClassDB.
 ///
 /// # Safety
@@ -217,6 +285,9 @@ pub unsafe fn register_class<T: GodotClass>() {
     info.is_exposed = true as sys::GDExtensionBool;
     info.is_runtime = T::IS_RUNTIME as sys::GDExtensionBool;
     info.to_string_func = Some(to_string::<T>);
+    info.notification_func = Some(notification::<T>);
+    info.get_func = Some(get_property::<T>);
+    info.set_func = Some(set_property::<T>);
     info.create_instance_func = Some(create_instance::<T>);
     info.free_instance_func = Some(free_instance::<T>);
     info.recreate_instance_func = Some(recreate_instance::<T>);

@@ -18,6 +18,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let mut has_init = false;
     let mut has_on_base_ready = false;
     let mut has_to_string = false;
+    let mut has_notification = false;
+    let mut has_get = false;
+    let mut has_set = false;
 
     // Collect the marked methods and strip the marker attributes, so the original `impl` block
     // still compiles as ordinary Rust.
@@ -53,10 +56,14 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             exported.push(parse_exported(method)?);
         }
         if is_virtual {
-            if method.sig.ident == "to_string" {
-                has_to_string = true;
-            } else {
-                virtuals.push(parse_virtual(method)?);
+            // A few hooks have dedicated slots in the creation info and are never requested by
+            // name, so routing them through the trampoline table would never fire.
+            match method.sig.ident.to_string().as_str() {
+                "to_string" => has_to_string = true,
+                "notification" => has_notification = true,
+                "get" => has_get = true,
+                "set" => has_set = true,
+                _ => virtuals.push(parse_virtual(method)?),
             }
         }
         if let Some(setter) = prop_setter {
@@ -146,6 +153,43 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         quote!()
     };
 
+    let notification_forward = if has_notification {
+        quote! {
+            fn godot_notification(&mut self, what: i32, reversed: bool) {
+                <Self>::notification(self, what, reversed)
+            }
+        }
+    } else {
+        quote!()
+    };
+
+    let get_forward = if has_get {
+        quote! {
+            fn godot_get(
+                &mut self,
+                property: &str,
+            ) -> Option<::godot::godot_core::builtin::Variant> {
+                <Self>::get(self, property)
+            }
+        }
+    } else {
+        quote!()
+    };
+
+    let set_forward = if has_set {
+        quote! {
+            fn godot_set(
+                &mut self,
+                property: &str,
+                value: &::godot::godot_core::builtin::Variant,
+            ) -> bool {
+                <Self>::set(self, property, value)
+            }
+        }
+    } else {
+        quote!()
+    };
+
     let base_name = base.to_string();
 
     Ok(quote! {
@@ -194,6 +238,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
             #base_ready_forward
             #to_string_forward
+            #notification_forward
+            #get_forward
+            #set_forward
 
             fn virtual_trampoline(
                 name: &str,

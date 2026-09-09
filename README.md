@@ -143,8 +143,8 @@ Built and covered by the integration tests:
 - Class registration, instantiation from GDScript and the editor
 - Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`)
 - Any engine virtual can be overridden -- `_ready`, `_process`, `_input`, `_enter_tree`,
-  `_to_string`, ... -- by declaring a `#[godot_virtual]` method whose Rust name is the Godot
-  one without its leading underscore
+  `_to_string`, `_notification`, `_get`/`_set`, ... -- by declaring a `#[godot_virtual]` method
+  whose Rust name is the Godot one without its leading underscore
 - `Variant` and the builtins:
   - strings: `GString`, `StringName`, `NodePath`
   - math: `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,

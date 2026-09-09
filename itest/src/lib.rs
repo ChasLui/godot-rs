@@ -101,6 +101,8 @@ struct RustTestNode {
     enter_tree_calls: i64,
     exit_tree_calls: i64,
     input_events: i64,
+    notifications: Vec<i32>,
+    dynamic_sink: i64,
     ready_calls: i64,
     process_calls: i64,
     physics_calls: i64,
@@ -120,6 +122,8 @@ impl RustTestNode {
             enter_tree_calls: 0,
             exit_tree_calls: 0,
             input_events: 0,
+            notifications: Vec::new(),
+            dynamic_sink: 0,
             ready_calls: 0,
             process_calls: 0,
             physics_calls: 0,
@@ -234,6 +238,32 @@ impl RustTestNode {
         GString::new("RustTestNode!")
     }
 
+    /// Godot's `_notification`, which has its own slot rather than going through the by-name
+    /// dispatch. Records the notifications the engine sends while entering the tree.
+    #[godot_virtual]
+    fn notification(&mut self, what: i32, _reversed: bool) {
+        self.notifications.push(what);
+    }
+
+    /// A property the class handles dynamically: `dynamic_*` names are answered here rather
+    /// than being registered up front.
+    #[godot_virtual]
+    fn get(&mut self, property: &str) -> Option<Variant> {
+        property
+            .strip_prefix("dynamic_")
+            .map(|rest| GString::new(&format!("got:{rest}")).to_variant())
+    }
+
+    #[godot_virtual]
+    fn set(&mut self, property: &str, value: &Variant) -> bool {
+        if property == "dynamic_sink" {
+            self.dynamic_sink = i64::try_from_variant(value).unwrap_or(-1);
+            true
+        } else {
+            false
+        }
+    }
+
     // -- Variant round trips ------------------------------------------------------------
 
     /// Each `echo_*` proves a full round trip: GDScript value -> Variant -> Rust type ->
@@ -292,6 +322,17 @@ impl RustTestNode {
     #[func]
     fn async_progress(&mut self) -> i64 {
         ASYNC_RESULT.with(|r| r.get())
+    }
+
+    /// Whether the engine sent the given notification, and what `_set` last stored.
+    #[func]
+    fn notification_seen(&mut self, what: i64) -> bool {
+        self.notifications.contains(&(what as i32))
+    }
+
+    #[func]
+    fn dynamic_sink_value(&mut self) -> i64 {
+        self.dynamic_sink
     }
 
     /// Counts for the virtuals that were impossible to override before.
