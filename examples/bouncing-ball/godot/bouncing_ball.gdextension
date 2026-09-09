@@ -1,0 +1,14 @@
+[configuration]
+
+entry_symbol = "bouncing_ball_init"
+compatibility_minimum = 4.7
+reloadable = true
+
+[libraries]
+
+macos.debug = "res://lib/libbouncing_ball.dylib"
+macos.release = "res://lib/libbouncing_ball.dylib"
+linux.debug.x86_64 = "res://lib/libbouncing_ball.so"
+linux.release.x86_64 = "res://lib/libbouncing_ball.so"
+windows.debug.x86_64 = "res://lib/bouncing_ball.dll"
+windows.release.x86_64 = "res://lib/bouncing_ball.dll"

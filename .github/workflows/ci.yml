@@ -109,10 +109,31 @@ jobs:
         run: ./check.sh etest
 
   examples:
-    name: examples build
+    name: examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p hello-world -p counter
+
+      - name: Download Godot ${{ env.GODOT_VERSION }}
+        run: |
+          url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          curl -L -o godot.zip "$url"
+          unzip -q godot.zip -d godot-bin
+          binary=$(find godot-bin -maxdepth 1 -type f -name 'Godot_v*' | head -1)
+          chmod +x "$binary"
+          echo "GODOT4_BIN=$PWD/$binary" >> "$GITHUB_ENV"
+
+      - run: cargo build -p hello-world -p counter -p bouncing-ball
+
+      # bouncing-ball checks its own physics headlessly and sets the exit code, so it is run
+      # rather than only compiled.
+      - name: Run the bouncing-ball example
+        run: |
+          target=$(cargo metadata --format-version 1 --no-deps \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+          cp "$target/debug/libbouncing_ball.so" examples/bouncing-ball/godot/lib/
+          # First run scans the project; the exit code of that scan is not meaningful.
+          "$GODOT4_BIN" --headless --path examples/bouncing-ball/godot --editor --quit >/dev/null 2>&1 || true
+          "$GODOT4_BIN" --headless --path examples/bouncing-ball/godot

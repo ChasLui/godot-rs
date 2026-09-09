@@ -1,0 +1,14 @@
+[package]
+name = "bouncing-ball"
+description = "A small game loop in Rust: physics, drawing, input and signals."
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+godot = { path = "../../godot", version = "0.1.0" }

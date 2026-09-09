@@ -131,6 +131,7 @@ windows.debug.x86_64 = "res://lib/my_library.dll"
 |---|---|
 | [`examples/hello-world`](examples/hello-world) | The smallest working extension |
 | [`examples/counter`](examples/counter) | Properties, signals, and frame-driven async |
+| [`examples/bouncing-ball`](examples/bouncing-ball) | A game loop: physics, custom drawing, input and signals together |
 
 Build and run one:
 

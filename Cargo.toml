@@ -11,4 +11,5 @@ members = [
     "itest",
     "examples/hello-world",
     "examples/counter",
+    "examples/bouncing-ball",
 ]
