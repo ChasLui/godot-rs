@@ -4,10 +4,8 @@
 //! constructor, and a destructor -- so the definition is written once here and invoked from the
 //! modules that group them by purpose.
 
-use crate::builtin::variant::{FromGodot, ToGodot, Variant};
 use crate::builtin::StringName;
 use godot_sys as sys;
-use std::mem::MaybeUninit;
 
 /// Resolves a builtin's constructor by index. Index 0 is always the default constructor and
 /// index 1 the copy constructor, for every type in this module.

@@ -355,11 +355,12 @@ fn generate_method(
     // Decided at generation time rather than emitted as a runtime `if`: an empty array's
     // `as_ptr` is dangling, and a zero-argument method needs no array at all.
     let args_setup = if arg_names.is_empty() {
-        quote!(let args_ptr = ::std::ptr::null();)
+        quote!(let __godot_args_ptr = ::std::ptr::null();)
     } else {
         quote! {
-            let args: [::godot_sys::GDExtensionConstTypePtr; #argc as usize] = [#(#arg_ptrs),*];
-            let args_ptr = args.as_ptr();
+            let __godot_args: [::godot_sys::GDExtensionConstTypePtr; #argc as usize] =
+                [#(#arg_ptrs),*];
+            let __godot_args_ptr = __godot_args.as_ptr();
         }
     };
 
@@ -368,17 +369,17 @@ fn generate_method(
         pub fn #fn_ident(#self_param #(#params),*) #ret_clause {
             static METHOD: ::std::sync::OnceLock<::godot_sys::GDExtensionPtrBuiltInMethod> =
                 ::std::sync::OnceLock::new();
-            let method = METHOD.get_or_init(|| unsafe {
+            let __godot_method = METHOD.get_or_init(|| unsafe {
                 builtin_method(::godot_sys::#tag_ident, #godot_name, #hash)
             });
-            let method = method.expect("builtin method pointer was null");
+            let __godot_method = __godot_method.expect("builtin method pointer was null");
 
             #args_setup
 
             // SAFETY: the signature matches the method identified by name and hash.
             unsafe {
                 crate::ptrcall::PtrcallRet::from_ptrcall(|ret| {
-                    method(#base_expr, args_ptr, ret, #argc);
+                    __godot_method(#base_expr, __godot_args_ptr, ret, #argc);
                 })
             }
         }
