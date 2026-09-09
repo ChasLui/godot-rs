@@ -40,6 +40,20 @@ jobs:
             -D clippy::style -D clippy::complexity -D clippy::perf \
             -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings
 
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # Broken intra-doc links and missing examples are how documentation rots unnoticed.
+      - run: cargo doc --workspace --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+      # The crate-level example is the README's, so this keeps the two from diverging.
+      - run: cargo test --doc -p godot
+
   unit-tests:
     name: unit tests
     runs-on: ubuntu-latest

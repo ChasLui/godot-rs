@@ -25,7 +25,7 @@ for arg in "${args[@]}"; do
         echo "    itest         run integration tests (needs Godot 4)"
         echo "    etest         run the editor-mode integration test"
         echo "    bench         measure call overhead against GDScript (build release first)"
-        echo "    doc           generate docs for the 'godot' crate"
+        echo "    doc           build the docs, failing on broken links, and run doctests"
         exit 0
     fi
 done
@@ -188,7 +188,9 @@ for arg in "${args[@]}"; do
         cmds+=("runGodot 180 $godotBin --headless --path itest/godot --scene res://bench/Bench.tscn")
         ;;
     doc)
-        cmds+=("cargo doc --lib -p godot --no-deps")
+        # Warnings as errors: a broken intra-doc link is how documentation rots unnoticed.
+        cmds+=("env RUSTDOCFLAGS=-Dwarnings cargo doc --workspace --no-deps")
+        cmds+=("cargo test --doc -p godot")
         ;;
     *)
         echo "Unrecognized command '$arg'"
