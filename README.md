@@ -198,7 +198,8 @@ Built and covered by the integration tests:
 ```
 
 `check.sh` finds Godot via `$GODOT4_BIN`, then `/Applications/Godot.app`, then `godot4`/`godot`
-on the path.
+on the path. Every engine run is time-limited: Godot does not exit when a GDScript fails to
+parse, so a typo in a test script would otherwise hang the run rather than report anything.
 
 The integration tests in [`itest/`](itest) are the real specification: assertions live on the
 GDScript side and decide the process exit code, so every feature is verified through the same

@@ -57,6 +57,62 @@ function libName() {
     esac
 }
 
+# Runs Godot with a time limit and fails loudly instead of hanging.
+#
+# Godot does not exit when a GDScript fails to parse -- it keeps the process alive with nothing
+# to run -- so a typo in a test script would otherwise stall until whatever outer timeout
+# applies. `timeout(1)` is not present on macOS by default, hence the explicit wait loop.
+function runGodot() {
+    local seconds="$1"
+    shift
+
+    local log
+    log=$(mktemp)
+
+    "$@" > "$log" 2>&1 &
+    local pid=$!
+
+    # Poll for the parse failure as well as for exit: Godot keeps running after one, so waiting
+    # for the full timeout would turn a typo into a multi-minute stall.
+    local waited=0
+    while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt "$seconds" ]; do
+        if grep -q "Parse Error\|Failed to load script" "$log" 2>/dev/null; then
+            break
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+
+    local status
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid" 2>/dev/null
+        wait "$pid" 2>/dev/null
+        status=124
+    else
+        wait "$pid"
+        status=$?
+    fi
+
+    cat "$log"
+
+    # A parse failure is the usual reason for a hang, and the message explains it far better
+    # than a bare timeout would.
+    if grep -q "Parse Error\|Failed to load script" "$log"; then
+        echo ""
+        echo "A GDScript failed to parse. Godot stays alive in that case, so this would have hung."
+        rm -f "$log"
+        return 1
+    fi
+
+    if [ "$status" -eq 124 ]; then
+        echo ""
+        echo "Godot did not exit within ${seconds}s; killed."
+    fi
+
+    rm -f "$log"
+    return "$status"
+}
+
 # A Godot project only picks up a .gdextension once its filesystem has been scanned, and the
 # resulting .godot/ directory is not committed. A fresh clone (or CI) therefore has to scan
 # once before any test can find the registered classes.
@@ -71,7 +127,7 @@ function ensureImported() {
     fi
 
     echo "First run: scanning $proj (Godot 4.7.2 may crash after the scan; the scan still completes)"
-    "$godotBin" --headless --path "$proj" --editor --quit >/dev/null 2>&1 || true
+    runGodot 120 "$godotBin" --headless --path "$proj" --editor --quit >/dev/null 2>&1 || true
 
     if [ ! -d "$proj/.godot" ]; then
         echo "Godot did not produce $proj/.godot; the project could not be scanned"
@@ -84,7 +140,7 @@ function ensureImported() {
 # what decides, not the exit code.
 function runEditorTest() {
     local output
-    output=$("$godotBin" --headless --path itest/godot --editor --quit 2>&1)
+    output=$(runGodot 180 "$godotBin" --headless --path itest/godot --editor --quit 2>&1)
     echo "$output" | grep -E "itest-editor"
     echo "$output" | grep -q "itest-editor: OK"
 }
@@ -109,7 +165,7 @@ for arg in "${args[@]}"; do
         cmds+=("cargo build -p itest")
         cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
         cmds+=("ensureImported itest/godot")
-        cmds+=("$godotBin --headless --path itest/godot")
+        cmds+=("runGodot 180 $godotBin --headless --path itest/godot")
         ;;
     etest)
         findGodot
