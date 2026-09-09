@@ -137,7 +137,12 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     info.call_func = Some(method_call::<T>);
     // No ptrcall: a fully untyped signature is always dispatched through `call_func`.
     info.ptrcall_func = None;
-    info.method_flags = sys::GDExtensionClassMethodFlags_GDEXTENSION_METHOD_FLAG_NORMAL;
+    // The cast looks redundant on Unix and is required on Windows: the underlying type of a C
+    // enum is implementation-defined, and bindgen follows it -- u32 with Clang, i32 with MSVC.
+    #[allow(clippy::unnecessary_cast)]
+    {
+        info.method_flags = sys::GDExtensionClassMethodFlags_GDEXTENSION_METHOD_FLAG_NORMAL as u32;
+    }
     info.has_return_value = true as sys::GDExtensionBool;
     info.return_value_info = &mut return_info as *mut _;
     info.return_value_metadata =
