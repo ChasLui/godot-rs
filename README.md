@@ -91,6 +91,13 @@ impl Player {
     #[godot_virtual]
     fn ready(&mut self) {
         godot_print("Player ready");
+
+        // Engine methods are called on the handle; `get_name` comes from Node, which this
+        // class inherits.
+        if let Some(node) = Gd::<godot::classes::Node>::new() {
+            node.set_name(&StringName::new("Spawned"));
+            unsafe { node.free() };
+        }
     }
 }
 
@@ -153,7 +160,8 @@ Built and covered by the integration tests:
   - containers: `VariantArray`, `Dictionary`, `TypedArray<T>`, and all ten `Packed*Array` types
   - callables: `Callable`, `Signal` -- from a registered method or from a Rust closure, so
     signals can be connected from Rust, not only GDScript
-- `Gd<T>` object handles with automatic reference counting
+- `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
+  methods read as `node.add_child(&child)` and inherited ones need no base-class name
 - Generated bindings for every non-editor engine class -- 954 classes, ~14,800 methods --
   called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
   Variant path

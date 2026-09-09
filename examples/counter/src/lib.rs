@@ -88,11 +88,7 @@ impl Counter {
                 let Some(obj) = (unsafe { Gd::<classes::Object>::from_obj_ptr(base) }) else {
                     return;
                 };
-                let _ = classes::Object::call(
-                    &obj,
-                    &StringName::new("_advance_by"),
-                    &[step.to_variant()],
-                );
+                let _ = obj.call(&StringName::new("_advance_by"), &[step.to_variant()]);
             }
         });
     }
@@ -116,8 +112,7 @@ impl Counter {
         let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
             return;
         };
-        let _ = classes::Object::emit_signal(
-            &this,
+        let _ = this.emit_signal(
             &StringName::new("value_changed"),
             &[self.value.to_variant()],
         );

@@ -184,6 +184,32 @@ impl<T: GodotObject> Gd<T> {
     }
 }
 
+/// Reaching a class's methods through `Gd`.
+///
+/// The marker types are zero-sized and live at the same address as the `Gd` they were reached
+/// through, so a method holding `&self` can recover the object pointer. Each class also derefs
+/// to its base, which is what makes an inherited method callable without naming the base class.
+impl<T: GodotObject> std::ops::Deref for Gd<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        // SAFETY: `Gd` is `repr(transparent)` over the pointer and `T` is zero-sized, so the
+        // reference is in bounds and carries no data of its own.
+        unsafe { &*(self as *const Gd<T> as *const T) }
+    }
+}
+
+/// Recovers the object pointer from a method's `&self`.
+///
+/// # Safety
+/// `this` must be a reference obtained by dereferencing a live `Gd`, which is the only way the
+/// generated methods are reachable.
+#[doc(hidden)]
+pub unsafe fn obj_ptr_from_ref<T>(this: &T) -> sys::GDExtensionObjectPtr {
+    // The marker sits at the `Gd`'s address; read the pointer back out of it.
+    *(this as *const T as *const sys::GDExtensionObjectPtr)
+}
+
 impl<T: GodotObject> Clone for Gd<T> {
     fn clone(&self) -> Self {
         if T::IS_REFCOUNTED {

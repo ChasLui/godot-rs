@@ -70,7 +70,7 @@ impl ExtensionLibrary for ItestLibrary {
 /// Whether Godot is running as an editor rather than playing the game.
 fn is_editor() -> bool {
     let engine = classes::Engine::singleton();
-    classes::Engine::is_editor_hint(&engine)
+    engine.is_editor_hint()
 }
 
 /// Registered only when running inside the editor, to prove the gate actually gates.
@@ -185,8 +185,7 @@ impl RustTestNode {
             return -1;
         };
 
-        match classes::Object::emit_signal(
-            &this,
+        match this.emit_signal(
             &StringName::new("counter_changed"),
             &[self.counter.to_variant()],
         ) {
@@ -401,14 +400,14 @@ impl RustTestNode {
     #[func]
     fn engine_os_name(&mut self) -> GString {
         let os = classes::OS::singleton();
-        classes::OS::get_name(&os)
+        os.get_name()
     }
 
     /// A bool-returning engine call, exercising a different ptrcall return width.
     #[func]
     fn engine_is_editor_hint(&mut self) -> bool {
         let engine = classes::Engine::singleton();
-        classes::Engine::is_editor_hint(&engine)
+        engine.is_editor_hint()
     }
 
     /// Round-trips through a real engine object: set a Node's name, read it back.
@@ -418,8 +417,8 @@ impl RustTestNode {
             return StringName::new("");
         };
 
-        classes::Node::set_name(&node, &name);
-        let read_back = classes::Node::get_name(&node);
+        node.set_name(&name);
+        let read_back = node.get_name();
 
         // Node is manually managed, so it must be freed explicitly.
         unsafe { node.free() };
@@ -541,18 +540,43 @@ impl RustTestNode {
             return -1;
         };
 
-        classes::Node::add_child_ex(
-            &parent,
+        parent.add_child_ex(
             &child,
             false,
             classes::NodeInternalMode::INTERNAL_MODE_FRONT,
         );
 
-        let short = classes::Node::get_child_count(&parent);
-        let full = classes::Node::get_child_count_ex(&parent, true);
+        let short = parent.get_child_count();
+        let full = parent.get_child_count_ex(true);
 
         unsafe { parent.free() };
         (short as i64) * 10 + full as i64
+    }
+
+    /// Calls methods reached through several Deref steps, to check the chain resolves to the
+    /// right object rather than merely compiling.
+    ///
+    /// `Sprite2D` inherits Node2D -> CanvasItem -> Node -> Object, so `get_class` comes from
+    /// four levels up and `set_name`/`get_name` from three.
+    #[func]
+    fn deref_chain(&mut self) -> GString {
+        let Some(sprite) = Gd::<classes::Sprite2D>::new() else {
+            return GString::new("<none>");
+        };
+
+        // From Node, three levels up.
+        sprite.set_name(&StringName::new("Deep"));
+        let name = sprite.get_name().to_rust_string();
+
+        // From Object, four levels up.
+        let class = sprite.get_class().to_rust_string();
+
+        // Declared on Sprite2D itself.
+        sprite.set_flip_h(true);
+        let flipped = sprite.is_flipped_h();
+
+        unsafe { sprite.free() };
+        GString::new(&format!("{name},{class},{flipped}"))
     }
 
     /// Round-trips a non-zero enum through the engine.
@@ -566,8 +590,8 @@ impl RustTestNode {
             return -1;
         };
 
-        classes::Node::set_process_mode(&node, classes::NodeProcessMode::PROCESS_MODE_ALWAYS);
-        let read_back = classes::Node::get_process_mode(&node);
+        node.set_process_mode(classes::NodeProcessMode::PROCESS_MODE_ALWAYS);
+        let read_back = node.get_process_mode();
 
         unsafe { node.free() };
         read_back.ord()
@@ -605,23 +629,15 @@ impl RustTestNode {
             Variant::nil()
         });
 
-        let err = classes::Object::connect(&this, &StringName::new("counter_changed"), &callable);
+        let err = this.connect(&StringName::new("counter_changed"), &callable);
         if err != global::Error::OK {
             return -100 - err.ord();
         }
 
-        let _ = classes::Object::emit_signal(
-            &this,
-            &StringName::new("counter_changed"),
-            &[3i64.to_variant()],
-        );
-        let _ = classes::Object::emit_signal(
-            &this,
-            &StringName::new("counter_changed"),
-            &[4i64.to_variant()],
-        );
+        let _ = this.emit_signal(&StringName::new("counter_changed"), &[3i64.to_variant()]);
+        let _ = this.emit_signal(&StringName::new("counter_changed"), &[4i64.to_variant()]);
 
-        classes::Object::disconnect(&this, &StringName::new("counter_changed"), &callable);
+        this.disconnect(&StringName::new("counter_changed"), &callable);
 
         // 3 + 4 if the closure ran for both emits.
         seen.get()
@@ -672,34 +688,22 @@ impl RustTestNode {
             return -2;
         }
 
-        let err = classes::Object::connect(&this, &StringName::new("counter_changed"), &callable);
+        let err = this.connect(&StringName::new("counter_changed"), &callable);
         if err != global::Error::OK {
             return -100 - err.ord();
         }
 
-        if !classes::Object::is_connected(&this, &StringName::new("counter_changed"), &callable) {
+        if !this.is_connected(&StringName::new("counter_changed"), &callable) {
             return -3;
         }
 
-        let _ = classes::Object::emit_signal(
-            &this,
-            &StringName::new("counter_changed"),
-            &[7i64.to_variant()],
-        );
-        let _ = classes::Object::emit_signal(
-            &this,
-            &StringName::new("counter_changed"),
-            &[8i64.to_variant()],
-        );
+        let _ = this.emit_signal(&StringName::new("counter_changed"), &[7i64.to_variant()]);
+        let _ = this.emit_signal(&StringName::new("counter_changed"), &[8i64.to_variant()]);
 
-        classes::Object::disconnect(&this, &StringName::new("counter_changed"), &callable);
+        this.disconnect(&StringName::new("counter_changed"), &callable);
 
         // A third emit after disconnecting must not reach the handler.
-        let _ = classes::Object::emit_signal(
-            &this,
-            &StringName::new("counter_changed"),
-            &[9i64.to_variant()],
-        );
+        let _ = this.emit_signal(&StringName::new("counter_changed"), &[9i64.to_variant()]);
 
         self.signal_hits
     }
@@ -767,11 +771,11 @@ impl RustTestNode {
 
         for _ in 0..3 {
             if let Some(child) = Gd::<classes::Node>::new() {
-                classes::Node::add_child(&parent, &child);
+                parent.add_child(&child);
             }
         }
 
-        let children = classes::Node::get_children(&parent);
+        let children = parent.get_children();
         let count = children.len();
 
         // Reading an element back proves the typed accessor works, not just the length.
@@ -826,7 +830,7 @@ impl RustTestNode {
         let Some(node) = Gd::<classes::Node>::new() else {
             return StringName::new("<none>");
         };
-        let name = classes::Node::get_name(&node);
+        let name = node.get_name();
         unsafe { node.free() };
         name
     }
@@ -836,7 +840,7 @@ impl RustTestNode {
         let Some(node) = Gd::<classes::Node>::new() else {
             return false;
         };
-        classes::Node::set_name(&node, &StringName::new("Probe"));
+        node.set_name(&StringName::new("Probe"));
         unsafe { node.free() };
         true
     }
@@ -851,16 +855,19 @@ impl RustTestNode {
             return GString::new("<none>");
         };
 
-        let after_new =
-            classes::RefCounted::get_reference_count(res.upcast_ref::<classes::RefCounted>());
+        let after_new = res
+            .upcast_ref::<classes::RefCounted>()
+            .get_reference_count();
 
         let copy = res.clone();
-        let after_clone =
-            classes::RefCounted::get_reference_count(copy.upcast_ref::<classes::RefCounted>());
+        let after_clone = copy
+            .upcast_ref::<classes::RefCounted>()
+            .get_reference_count();
 
         drop(copy);
-        let after_drop =
-            classes::RefCounted::get_reference_count(res.upcast_ref::<classes::RefCounted>());
+        let after_drop = res
+            .upcast_ref::<classes::RefCounted>()
+            .get_reference_count();
 
         GString::new(&format!("{after_new},{after_clone},{after_drop}"))
     }

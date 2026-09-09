@@ -362,6 +362,11 @@ func test_collections() -> void:
 		"default argument substitution: got %d, expected 1 (short=0, full=1)"
 			% n.default_arguments_match())
 
+	# Methods inherited across several Deref steps must land on the right object: the name and
+	# class come from three and four levels up the hierarchy, the flip flag from Sprite2D itself.
+	check(n.deref_chain() == "Deep,Sprite2D,true",
+		"deref chain gave %s, expected Deep,Sprite2D,true" % n.deref_chain())
+
 	# Enums cross ptrcall as 64-bit integers. PROCESS_MODE_ALWAYS is non-zero, so a wrong width
 	# would show up here rather than passing by accident.
 	check(n.enum_roundtrip() == Node.PROCESS_MODE_ALWAYS,

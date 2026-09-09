@@ -72,6 +72,7 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
     }
 
     let inherits = generate_inherits(&class_map, &selected, &ordered);
+    let derefs = generate_derefs(&class_map, &ordered);
     let enum_owners = referenced_enum_owners(&class_map, &selected);
     let class_enums = generate_class_enums(&api, &class_map, &enum_owners);
     let singletons = generate_singletons(&api, &selected);
@@ -96,6 +97,7 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
         pub mod classes {
             #class_defs
             #inherits
+            #derefs
             #singletons
             #class_enums
         }
@@ -270,13 +272,15 @@ fn generate_method(
 
     let doc = format!("Calls `{}::{}`.", class.name, method.name);
 
-    // Static methods have no instance; Godot expects a null object pointer.
+    // Static methods have no instance; Godot expects a null object pointer. Instance methods
+    // take `&self` on the marker type, which `Gd` derefs to, and recover the object pointer
+    // from that reference's address.
     let (self_param, instance_expr) = if method.is_static {
         (quote!(), quote!(::std::ptr::null_mut()))
     } else {
         (
-            quote!(this: &::godot_core::obj::Gd<Self>,),
-            quote!(::godot_core::obj::Gd::as_obj_ptr(this)),
+            quote!(&self,),
+            quote!(::godot_core::obj::obj_ptr_from_ref(self)),
         )
     };
 
@@ -338,7 +342,7 @@ fn generate_method(
     let self_forward = if method.is_static {
         quote!()
     } else {
-        quote!(this,)
+        quote!(self,)
     };
 
     let omitted: Vec<String> = method.arguments[required..]
@@ -364,6 +368,38 @@ fn generate_method(
             Self::#ex_ident(#self_forward #(#forwarded),*)
         }
     })
+}
+
+/// Emits `Deref` from each class to its base, so an inherited method is reachable without
+/// naming the base: `Gd<Node2D>` derefs to `Node2D`, which derefs to `CanvasItem`, and so on.
+fn generate_derefs(class_map: &HashMap<&str, &Class>, ordered: &[&str]) -> TokenStream {
+    let mut out = TokenStream::new();
+
+    for name in ordered {
+        let Some(base) = class_map[name].inherits.as_deref() else {
+            continue;
+        };
+        if !class_map.contains_key(base) {
+            continue;
+        }
+
+        let class_ident = format_ident!("{}", name);
+        let base_ident = format_ident!("{}", base);
+
+        out.extend(quote! {
+            impl ::std::ops::Deref for #class_ident {
+                type Target = #base_ident;
+
+                fn deref(&self) -> &#base_ident {
+                    // SAFETY: both markers are zero-sized and sit at the address of the `Gd`
+                    // they were reached through, so the base view is the same object.
+                    unsafe { &*(self as *const #class_ident as *const #base_ident) }
+                }
+            }
+        });
+    }
+
+    out
 }
 
 /// Emits `Inherits<Ancestor>` for every class/ancestor pair, so `Gd::upcast_ref` can be checked
@@ -449,8 +485,8 @@ fn generate_vararg_method(
         (quote!(), quote!(::std::ptr::null_mut()))
     } else {
         (
-            quote!(this: &::godot_core::obj::Gd<Self>,),
-            quote!(::godot_core::obj::Gd::as_obj_ptr(this)),
+            quote!(&self,),
+            quote!(::godot_core::obj::obj_ptr_from_ref(self)),
         )
     };
 
