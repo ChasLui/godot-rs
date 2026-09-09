@@ -1,9 +1,14 @@
+#[macro_use]
+pub(crate) mod macros;
+
+pub(crate) mod callable;
 pub(crate) mod collection;
 mod math;
 mod string;
 mod string_name;
 mod variant;
 
+pub use callable::{Callable, Signal};
 pub use collection::{
     ArrayElement, Dictionary, NodePath, PackedByteArray, PackedColorArray, PackedFloat32Array,
     PackedFloat64Array, PackedInt32Array, PackedInt64Array, PackedStringArray, PackedVector2Array,

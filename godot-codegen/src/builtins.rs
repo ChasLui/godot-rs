@@ -173,6 +173,16 @@ const BUILTINS: &[BuiltinType] = &[
         rust: "PackedVector4Array",
         tag: "PACKED_VECTOR4_ARRAY",
     },
+    BuiltinType {
+        godot: "Callable",
+        rust: "Callable",
+        tag: "CALLABLE",
+    },
+    BuiltinType {
+        godot: "Signal",
+        rust: "Signal",
+        tag: "SIGNAL",
+    },
 ];
 
 /// Methods already written by hand in `godot-core`, which must not be generated a second time.
@@ -254,7 +264,7 @@ pub fn generate_builtin_methods(api_json_path: &str) -> GeneratedBuiltins {
 
     let code = quote! {
         // Generated from `extension_api.json`. Do not edit.
-        use crate::builtin::collection::builtin_method;
+        use crate::builtin::macros::builtin_method;
 
         #out
     };
@@ -306,10 +316,13 @@ fn generate_method(
         .iter()
         .zip(&arg_types)
         .map(|(name, ty)| {
+            // The pointee type is spelled out: `&T as *const _` gives the compiler nothing to
+            // infer from, since the reference itself is also a pointer-like value.
+            let owned = ty.owned_tokens();
             if ty.is_by_ref() {
-                quote!(#name as *const _ as ::godot_sys::GDExtensionConstTypePtr)
+                quote!(#name as *const #owned as ::godot_sys::GDExtensionConstTypePtr)
             } else {
-                quote!(&#name as *const _ as ::godot_sys::GDExtensionConstTypePtr)
+                quote!(&#name as *const #owned as ::godot_sys::GDExtensionConstTypePtr)
             }
         })
         .collect();

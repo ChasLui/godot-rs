@@ -184,6 +184,8 @@ pub fn map_type(
         "PackedVector3Array" => return Some(RustTy::Builtin("PackedVector3Array")),
         "PackedColorArray" => return Some(RustTy::Builtin("PackedColorArray")),
         "PackedVector4Array" => return Some(RustTy::Builtin("PackedVector4Array")),
+        "Callable" => return Some(RustTy::Builtin("Callable")),
+        "Signal" => return Some(RustTy::Builtin("Signal")),
         _ => {}
     }
 

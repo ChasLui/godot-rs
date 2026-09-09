@@ -158,7 +158,7 @@ impl Clone for StringName {
         // initialized value.
         unsafe {
             let mut opaque = MaybeUninit::<[u8; sys::builtin_sizes::SIZE_STRINGNAME]>::uninit();
-            let ctor = crate::builtin::collection::constructor(
+            let ctor = crate::builtin::macros::constructor(
                 sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING_NAME,
                 1,
             )

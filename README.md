@@ -148,6 +148,7 @@ Built and covered by the integration tests:
   - math: `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,
     `Quaternion`, `Plane`, `AABB`, `Projection`, `Rid`
   - containers: `VariantArray`, `Dictionary`, `TypedArray<T>`, and all ten `Packed*Array` types
+  - callables: `Callable`, `Signal` -- so signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting
 - Generated bindings for a subset of the engine API, called through `ptrcall`, plus variadic
   methods (`emit_signal`, `call`, `rpc`) through the Variant path
@@ -158,9 +159,11 @@ Built and covered by the integration tests:
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
-- `Callable` and `Signal` as first-class types
 - Only 106 of the engine's 1036 classes are generated (the closure of a seed set; see
-  `godot-codegen/src/lib.rs`). The build prints how many methods were skipped.
+  `godot-codegen/src/lib.rs`). Within those classes every method is now bound except the
+  virtual ones, which an extension overrides rather than calls. The build prints the counts.
+- Callables built from a Rust closure; `Callable` currently references a registered method
+  by name.
 - Default arguments, and engine enums as Rust types (they surface as `i64`)
 - `EditorPlugin` beyond registration; no editor UI integration
 - Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested

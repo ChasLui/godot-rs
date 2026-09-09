@@ -18,6 +18,7 @@ func _ready() -> void:
 	test_reference_counting()
 	test_properties()
 	test_signals()
+	test_rust_side_connect()
 	test_init_levels()
 	test_math_builtins()
 	test_collections()
@@ -185,6 +186,21 @@ func test_signals() -> void:
 
 func _on_counter_changed(new_value: int) -> void:
 	signal_payloads.append(new_value)
+
+func test_rust_side_connect() -> void:
+	# A fresh instance, with no GDScript connection on it, so the count reflects only the
+	# handler Rust connected. Called once and stored: `check` evaluates both its arguments,
+	# so inlining the call in the message would run the whole emit sequence twice.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+
+	var hits: int = n.connect_and_emit_from_rust()
+	check(hits == 2,
+		"Rust-side connect/emit ran the handler %d times; 2 emits while connected, " % hits
+			+ "1 after disconnecting. A negative value means it failed before emitting.")
+	check(n.last_signal_value() == 8,
+		"signal argument was %d, expected the second emit's 8" % n.last_signal_value())
+
+	n.free()
 
 func test_init_levels() -> void:
 	# Godot runs the Editor init level during a game run too, so a class must be gated on

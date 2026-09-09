@@ -5,7 +5,7 @@
 //! path a real user's code takes.
 
 use godot::builtin::{
-    Color, Dictionary, NodePath, PackedByteArray, PackedFloat32Array, PackedStringArray,
+    Callable, Color, Dictionary, NodePath, PackedByteArray, PackedFloat32Array, PackedStringArray,
     Transform2D, TypedArray, VariantArray, Vector2, Vector3,
 };
 use godot::classes;
@@ -95,6 +95,8 @@ struct RustTestNode {
     speed: f64,
     label: GString,
     base: sys::GDExtensionObjectPtr,
+    signal_hits: i64,
+    last_signal_value: i64,
     ready_calls: i64,
     process_calls: i64,
     physics_calls: i64,
@@ -109,6 +111,8 @@ impl RustTestNode {
             speed: 0.0,
             label: GString::new("unset"),
             base: std::ptr::null_mut(),
+            signal_hits: 0,
+            last_signal_value: 0,
             ready_calls: 0,
             process_calls: 0,
             physics_calls: 0,
@@ -399,6 +403,69 @@ impl RustTestNode {
     #[func]
     fn node_path_roundtrip(&mut self, path: GString) -> NodePath {
         NodePath::from_path(&path.to_rust_string())
+    }
+
+    /// Connects a signal to a Rust method from Rust, then emits it.
+    ///
+    /// This is the whole point of Callable: before it, a Rust class could declare a signal but
+    /// only GDScript could connect to it. Returns the number of times the handler ran.
+    #[func]
+    fn connect_and_emit_from_rust(&mut self) -> i64 {
+        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
+            return -1;
+        };
+
+        self.signal_hits = 0;
+
+        let callable = Callable::from_object_method(&this, &StringName::new("_on_own_signal"));
+        if !callable.is_valid() {
+            return -2;
+        }
+
+        let err =
+            classes::Object::connect(&this, &StringName::new("counter_changed"), &callable, 0);
+        if err != 0 {
+            return -100 - err;
+        }
+
+        if !classes::Object::is_connected(&this, &StringName::new("counter_changed"), &callable) {
+            return -3;
+        }
+
+        let _ = classes::Object::emit_signal(
+            &this,
+            &StringName::new("counter_changed"),
+            &[7i64.to_variant()],
+        );
+        let _ = classes::Object::emit_signal(
+            &this,
+            &StringName::new("counter_changed"),
+            &[8i64.to_variant()],
+        );
+
+        classes::Object::disconnect(&this, &StringName::new("counter_changed"), &callable);
+
+        // A third emit after disconnecting must not reach the handler.
+        let _ = classes::Object::emit_signal(
+            &this,
+            &StringName::new("counter_changed"),
+            &[9i64.to_variant()],
+        );
+
+        self.signal_hits
+    }
+
+    /// Signal handler, reached through the Callable above.
+    #[func]
+    fn _on_own_signal(&mut self, value: i64) {
+        self.signal_hits += 1;
+        self.last_signal_value = value;
+    }
+
+    /// The value the last signal delivered, to prove arguments arrive intact.
+    #[func]
+    fn last_signal_value(&mut self) -> i64 {
+        self.last_signal_value
     }
 
     /// Exercises methods that are now generated rather than hand-written, across the three

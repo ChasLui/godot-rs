@@ -130,7 +130,7 @@ impl Clone for GString {
         // initialized value.
         unsafe {
             let mut opaque = MaybeUninit::<[u8; sys::builtin_sizes::SIZE_STRING]>::uninit();
-            let ctor = crate::builtin::collection::constructor(
+            let ctor = crate::builtin::macros::constructor(
                 sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
                 1,
             )
