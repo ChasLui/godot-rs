@@ -1,10 +1,8 @@
 //! Generates Rust bindings from Godot's `extension_api.json`.
 //!
-//! Only a subset of the engine's 1000+ classes is generated: the transitive closure of a seed
-//! set over everything those classes' signatures mention. Generating all of them would make
-//! compile times unusable, and most projects touch a small fraction. Methods whose types are not
-//! supported yet are skipped and *counted* -- the build prints what it dropped, so the coverage
-//! gap is never silent.
+//! Every class the engine exposes is generated, minus the editor-only ones unless the `editor`
+//! feature asks for them. Methods whose types are not supported are skipped and *counted* -- the
+//! build prints what it dropped, so the coverage gap is never silent.
 
 pub mod api;
 pub mod builtins;
@@ -14,55 +12,19 @@ use api::{Api, Class};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::{HashMap, HashSet};
-use types::{default_value_expr, map_type, rust_safe_name, RustTy};
+use types::{default_value_expr, map_type_with, rust_safe_name, RustTy};
 
-/// Classes the closure starts from: enough to write ordinary game logic.
+/// Every class the bindings expose.
 ///
-/// Kept deliberately small. Each seed drags in everything its signatures mention, and the
-/// generated code is the bulk of this crate's compile time; adding a seed is a decision to pay
-/// for its whole dependency closure.
-pub const SEED_CLASSES: &[&str] = &[
-    // Core object model and the scene tree.
-    "Object",
-    "RefCounted",
-    "Node",
-    "CanvasItem",
-    "Node2D",
-    "Node3D",
-    "Resource",
-    "SceneTree",
-    "Viewport",
-    "Window",
-    // Engine services.
-    "Input",
-    "OS",
-    "Engine",
-    "Time",
-    "PackedScene",
-    "ResourceLoader",
-    "RandomNumberGenerator",
-    // Common building blocks for actual games.
-    "Timer",
-    "Control",
-    "Label",
-    "Button",
-    "Sprite2D",
-    "AnimatedSprite2D",
-    "Camera2D",
-    "Camera3D",
-    "MeshInstance3D",
-    "Area2D",
-    "RigidBody2D",
-    "CharacterBody2D",
-    "CollisionShape2D",
-    "Marker2D",
-    "Path2D",
-    "PathFollow2D",
-    "AudioStreamPlayer",
-];
-
-/// Additional seeds for editor tooling, pulled in only with the `editor` feature.
-pub const EDITOR_SEED_CLASSES: &[&str] = &["EditorPlugin", "EditorInterface"];
+/// Editor classes are excluded unless asked for: an extension that references one fails to load
+/// in an exported project, where those classes do not exist.
+fn selected_classes(api: &Api, include_editor: bool) -> HashSet<&str> {
+    api.classes
+        .iter()
+        .filter(|c| include_editor || c.api_type != "editor")
+        .map(|c| c.name.as_str())
+        .collect()
+}
 
 pub struct Generated {
     pub code: String,
@@ -86,7 +48,11 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
         api.classes.iter().map(|c| (c.name.as_str(), c)).collect();
     let is_class = |name: &str| class_map.contains_key(name);
 
-    let selected = transitive_closure(&api, &class_map, include_editor);
+    let global_enum_names: HashSet<&str> =
+        api.global_enums.iter().map(|e| e.name.as_str()).collect();
+    let is_global_enum = |name: &str| global_enum_names.contains(name);
+
+    let selected = selected_classes(&api, include_editor);
 
     // Deterministic order: the generated file must not churn between builds.
     let mut ordered: Vec<&str> = selected.iter().copied().collect();
@@ -98,7 +64,8 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
 
     for name in &ordered {
         let class = class_map[name];
-        let (tokens, generated, skipped) = generate_class(class, &is_class, &selected);
+        let (tokens, generated, skipped) =
+            generate_class(class, &is_class, &is_global_enum, &selected);
         class_defs.extend(tokens);
         method_count += generated;
         skipped_methods += skipped;
@@ -106,7 +73,7 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
 
     let inherits = generate_inherits(&class_map, &selected, &ordered);
     let enum_owners = referenced_enum_owners(&class_map, &selected);
-    let class_enums = generate_class_enums(&class_map, &enum_owners);
+    let class_enums = generate_class_enums(&api, &class_map, &enum_owners);
     let singletons = generate_singletons(&api, &selected);
     let global_enums = generate_global_enums(&api);
 
@@ -142,94 +109,10 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
     }
 }
 
-/// Every class reachable from [`SEED_CLASSES`] through inheritance or a signature mention.
-fn transitive_closure<'a>(
-    api: &'a Api,
-    class_map: &HashMap<&'a str, &'a Class>,
-    include_editor: bool,
-) -> HashSet<&'a str> {
-    let mut seen: HashSet<&str> = HashSet::new();
-    let mut frontier: Vec<&str> = Vec::new();
-
-    let seeds: Vec<&str> = if include_editor {
-        SEED_CLASSES
-            .iter()
-            .chain(EDITOR_SEED_CLASSES)
-            .copied()
-            .collect()
-    } else {
-        SEED_CLASSES.to_vec()
-    };
-
-    for seed in &seeds {
-        if let Some(class) = class_map.get(seed) {
-            if seen.insert(class.name.as_str()) {
-                frontier.push(class.name.as_str());
-            }
-        }
-    }
-
-    while let Some(current) = frontier.pop() {
-        let class = class_map[current];
-        for dep in class_dependencies(class, class_map) {
-            if seen.insert(dep) {
-                frontier.push(dep);
-            }
-        }
-    }
-
-    // Editor-only classes are dropped unless asked for: an extension that references them
-    // fails to load in an exported project, where those classes do not exist.
-    if !include_editor {
-        seen.retain(|name| class_map[name].api_type != "editor");
-    }
-
-    let _ = api;
-    seen
-}
-
-fn class_dependencies<'a>(
-    class: &'a Class,
-    class_map: &HashMap<&'a str, &'a Class>,
-) -> Vec<&'a str> {
-    let mut out = Vec::new();
-
-    let mut push = |type_str: &'a str| {
-        let bare = type_str
-            .trim_start_matches("const ")
-            .trim_end_matches('*')
-            .trim();
-        if let Some((_, name)) = class_map.get_key_value(bare) {
-            out.push(name.name.as_str());
-        }
-    };
-
-    if let Some(base) = class.inherits.as_deref() {
-        push(base);
-    }
-    for m in &class.methods {
-        if let Some(ret) = &m.return_value {
-            push(&ret.type_);
-        }
-        for a in &m.arguments {
-            push(&a.type_);
-        }
-    }
-    for p in &class.properties {
-        push(&p.type_);
-    }
-    for s in &class.signals {
-        for a in &s.arguments {
-            push(&a.type_);
-        }
-    }
-
-    out
-}
-
 fn generate_class(
     class: &Class,
     is_class: &dyn Fn(&str) -> bool,
+    is_global_enum: &dyn Fn(&str) -> bool,
     selected: &HashSet<&str>,
 ) -> (TokenStream, usize, usize) {
     let class_ident = format_ident!("{}", class.name);
@@ -253,9 +136,9 @@ fn generate_class(
         };
 
         let generated_tokens = if method.is_vararg {
-            generate_vararg_method(class, method, hash, is_class, selected)
+            generate_vararg_method(class, method, hash, is_class, is_global_enum, selected)
         } else {
-            generate_method(class, method, hash, is_class, selected)
+            generate_method(class, method, hash, is_class, is_global_enum, selected)
         };
 
         match generated_tokens {
@@ -317,12 +200,13 @@ fn generate_method(
     method: &api::Method,
     hash: i64,
     is_class: &dyn Fn(&str) -> bool,
+    is_global_enum: &dyn Fn(&str) -> bool,
     selected: &HashSet<&str>,
 ) -> Option<TokenStream> {
     // Return type.
     let ret_ty = match &method.return_value {
         None => RustTy::Void,
-        Some(ret) => map_type(&ret.type_, ret.meta.as_deref(), is_class)?,
+        Some(ret) => map_type_with(&ret.type_, ret.meta.as_deref(), is_class, is_global_enum)?,
     };
     if !all_classes_available(&ret_ty, selected) {
         return None;
@@ -333,7 +217,7 @@ fn generate_method(
     let mut arg_types = Vec::new();
     let mut arg_defaults = Vec::new();
     for arg in &method.arguments {
-        let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
+        let ty = map_type_with(&arg.type_, arg.meta.as_deref(), is_class, is_global_enum)?;
         if !all_classes_available(&ty, selected) {
             return None;
         }
@@ -518,13 +402,14 @@ fn generate_vararg_method(
     method: &api::Method,
     hash: i64,
     is_class: &dyn Fn(&str) -> bool,
+    is_global_enum: &dyn Fn(&str) -> bool,
     selected: &HashSet<&str>,
 ) -> Option<TokenStream> {
     let mut arg_names = Vec::new();
     let mut arg_types = Vec::new();
 
     for arg in &method.arguments {
-        let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
+        let ty = map_type_with(&arg.type_, arg.meta.as_deref(), is_class, is_global_enum)?;
         if !all_classes_available(&ty, selected) {
             return None;
         }
@@ -759,19 +644,33 @@ fn generate_global_enums(api: &Api) -> TokenStream {
 /// there is no reason to drop a method just because its enum happens to be declared on a class
 /// outside the selection.
 fn generate_class_enums(
+    api: &Api,
     class_map: &HashMap<&str, &Class>,
     owners: &HashSet<String>,
 ) -> TokenStream {
     let mut out = TokenStream::new();
 
+    // Enums live on builtin types as well as on classes -- `Vector3.Axis`, `Variant.Type` --
+    // and a signature can name either.
+    let builtin_map: HashMap<&str, &api::BuiltinClass> = api
+        .builtin_classes
+        .iter()
+        .map(|b| (b.name.as_str(), b))
+        .collect();
+
     let mut ordered: Vec<&String> = owners.iter().collect();
     ordered.sort();
 
     for owner in ordered {
-        let Some(class) = class_map.get(owner.as_str()) else {
+        let enums: &[api::ClassEnum] = if let Some(class) = class_map.get(owner.as_str()) {
+            &class.enums
+        } else if let Some(builtin) = builtin_map.get(owner.as_str()) {
+            &builtin.enums
+        } else {
             continue;
         };
-        for class_enum in &class.enums {
+
+        for class_enum in enums {
             let rust_name = format!("{}{}", owner, enum_rust_name(&class_enum.name));
             out.extend(generate_enum(
                 &rust_name,

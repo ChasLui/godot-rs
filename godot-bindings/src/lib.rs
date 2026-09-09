@@ -9,6 +9,9 @@
 #![allow(clippy::too_many_arguments)]
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 #![allow(clippy::wrong_self_convention)]
+// Method names come from the engine: GDScript::new is Godot's own, and does not return Self.
+#![allow(clippy::new_ret_no_self)]
+#![allow(clippy::should_implement_trait)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 

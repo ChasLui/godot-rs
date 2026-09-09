@@ -21,6 +21,8 @@ pub struct BuiltinClass {
     pub name: String,
     #[serde(default)]
     pub methods: Vec<BuiltinMethod>,
+    #[serde(default)]
+    pub enums: Vec<ClassEnum>,
 }
 
 /// Builtin methods differ from class methods: the return type is a bare string rather than a

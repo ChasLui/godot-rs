@@ -150,8 +150,9 @@ Built and covered by the integration tests:
   - containers: `VariantArray`, `Dictionary`, `TypedArray<T>`, and all ten `Packed*Array` types
   - callables: `Callable`, `Signal` -- so signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting
-- Generated bindings for a subset of the engine API, called through `ptrcall`, plus variadic
-  methods (`emit_signal`, `call`, `rpc`) through the Variant path
+- Generated bindings for every non-editor engine class -- 954 classes, ~14,800 methods --
+  called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
+  Variant path
 - Generated methods on the builtin types themselves (`String::find`, `Array::sort`,
   `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
 - Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
@@ -163,11 +164,10 @@ Built and covered by the integration tests:
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
-- Only 106 of the engine's 1036 classes are generated (the closure of a seed set; see
-  `godot-codegen/src/lib.rs`). Within those classes every method is now bound except the
-  virtual ones, which an extension overrides rather than calls. The build prints the counts.
 - Callables built from a Rust closure; `Callable` currently references a registered method
   by name.
+- Editor classes are behind the `editor` feature and off by default, since an extension that
+  references them fails to load in an exported project
 - `EditorPlugin` beyond registration; no editor UI integration
 - Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested
 - Windows, Android and iOS are not covered by CI

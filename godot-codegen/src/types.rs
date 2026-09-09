@@ -144,10 +144,29 @@ pub fn map_type(
     meta: Option<&str>,
     is_class: &dyn Fn(&str) -> bool,
 ) -> Option<RustTy> {
+    map_type_with(godot_type, meta, is_class, &|_| false)
+}
+
+/// As [`map_type`], but able to recognise global enums whose name contains a dot.
+///
+/// `Variant.Type` is spelled like a class-scoped enum but is declared globally, so the split on
+/// `.` has to be checked against the global list rather than assumed.
+pub fn map_type_with(
+    godot_type: &str,
+    meta: Option<&str>,
+    is_class: &dyn Fn(&str) -> bool,
+    is_global_enum: &dyn Fn(&str) -> bool,
+) -> Option<RustTy> {
     // `enum::Error`, `enum::Node.ProcessMode`, `bitfield::PropertyUsageFlags`. Class-scoped
     // names become `<Class><Enum>` to match how the generator emits them.
     for prefix in ["enum::", "bitfield::"] {
         if let Some(rest) = godot_type.strip_prefix(prefix) {
+            if is_global_enum(rest) {
+                return Some(RustTy::Enum {
+                    name: rest.replace('.', ""),
+                    owner: None,
+                });
+            }
             return Some(match rest.split_once('.') {
                 Some((class, name)) => RustTy::Enum {
                     name: name.to_string(),
@@ -164,7 +183,7 @@ pub fn map_type(
     // A typed array's element type is resolved recursively; a nested typed array is not
     // something the engine produces, so one level is enough.
     if let Some(elem) = godot_type.strip_prefix("typedarray::") {
-        let elem_ty = map_type(elem, None, is_class)?;
+        let elem_ty = map_type_with(elem, None, is_class, is_global_enum)?;
         if matches!(elem_ty, RustTy::Void | RustTy::Enum { .. }) {
             return None;
         }
