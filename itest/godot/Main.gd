@@ -89,6 +89,22 @@ func test_virtuals() -> void:
 		check(int(extra[0]) == 1, "_enter_tree fired %s times, expected 1" % extra[0])
 		check(int(extra[1]) == 0, "_exit_tree fired %s times before removal, expected 0" % extra[1])
 
+	# The virtual-return path with an owned builtin. No engine virtual returning one can be
+	# triggered from a running game, so the Rust side stands in for the engine and builds the
+	# return slot the way GDVIRTUAL_CALL does: default-constructed, holding a value the callee
+	# must release.
+	check(virtual_node.probe_virtual_return(1) == 2,
+		"the virtual return slot did not receive the value")
+
+	# Content alone cannot see a leak -- overwriting the slot instead of assigning to it
+	# produces the right answer and drops the engine's value on the floor. Only the memory
+	# does, across enough iterations to dwarf the noise.
+	var before := Performance.get_monitor(Performance.MEMORY_STATIC)
+	check(virtual_node.probe_virtual_return(200000) == 2, "probe failed under repetition")
+	var leaked := Performance.get_monitor(Performance.MEMORY_STATIC) - before
+	check(leaked < 1_000_000,
+		"the virtual return path leaked %s bytes over 200k calls" % leaked)
+
 	# _notification has its own slot in the creation info. NOTIFICATION_ENTER_TREE fires when
 	# the node is added, so by now the engine must have sent it.
 	check(virtual_node.notification_seen(Node.NOTIFICATION_ENTER_TREE),

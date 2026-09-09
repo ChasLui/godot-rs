@@ -91,6 +91,33 @@ mod builtin_sizes {
         out
     }
 
+    /// Hashes of the `ClassDB` methods `godot-core` calls directly.
+    ///
+    /// Registration asks the engine which virtuals a base class has, so a misspelled
+    /// `#[godot_virtual]` is reported rather than silently never invoked.
+    fn classdb_hashes(api: &Api) -> proc_macro2::TokenStream {
+        let class = api
+            .classes
+            .iter()
+            .find(|c| c.name == "ClassDB")
+            .expect("ClassDB missing from extension_api.json");
+
+        let wanted = "class_get_method_list";
+        let method = class
+            .methods
+            .iter()
+            .find(|m| m.name == wanted)
+            .unwrap_or_else(|| panic!("ClassDB::{wanted} missing from extension_api.json"));
+        let hash = method
+            .hash
+            .unwrap_or_else(|| panic!("ClassDB::{wanted} has no hash"));
+        let ident = format_ident!("CLASSDB_{}", wanted.to_uppercase());
+
+        quote! {
+            pub const #ident: i64 = #hash;
+        }
+    }
+
     /// Hashes of the few utility functions `godot-core` calls directly.
     fn utility_hashes(api: &Api) -> proc_macro2::TokenStream {
         let mut out = proc_macro2::TokenStream::new();
@@ -152,6 +179,7 @@ mod builtin_sizes {
         // keeps them derived from the API dump rather than hand-copied.
         let refcount_hashes = refcounted_hashes(&api);
         let utility_hashes = utility_hashes(&api);
+        let classdb_hashes = classdb_hashes(&api);
 
         let config_str = config;
         let generated = quote! {
@@ -166,6 +194,7 @@ mod builtin_sizes {
             pub mod method_hashes {
                 #refcount_hashes
                 #utility_hashes
+                #classdb_hashes
             }
         };
 

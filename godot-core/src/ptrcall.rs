@@ -44,6 +44,9 @@ pub unsafe trait PtrcallRet: Sized {
 /// `Variant`, ...) *assigns* into the destination -- releasing whatever it believes is already
 /// there. Handing it uninitialized stack memory makes it unref a garbage pointer. All-zero is
 /// the empty/nil representation for these types, so releasing it is a no-op.
+///
+/// The mirror of this rule is in [`crate::virtuals`]: there *we* assign into *the engine's*
+/// slot, which it default-constructs for us.
 macro_rules! impl_ptrcall_direct {
     ($($t:ty),* $(,)?) => {
         $(

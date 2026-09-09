@@ -105,11 +105,26 @@ unsafe impl<T: crate::obj::GodotObject> FromPtrcallArg for Option<crate::obj::Gd
 
 /// Writes a virtual method's return value into the engine's slot.
 ///
+/// The slot holds a **default-constructed** value, so the write must *assign* -- releasing what
+/// is already there -- rather than overwrite it. Godot's `GDVIRTUAL_CALL` declares the slot as
+///
+/// ```cpp
+/// PtrToArg<m_ret>::EncodeT ret;          // default-constructed, not zeroed, not uninitialized
+/// call_virtual_with_data(..., &ret);
+/// ```
+///
+/// so `std::ptr::write` here would drop nothing and leak the engine's value. For a `GString`
+/// that is an empty string with no allocation behind it, which is why this went unnoticed; for a
+/// `Dictionary` or a `PackedStringArray` it is a real leak.
+///
+/// This is the mirror of the rule in [`crate::ptrcall`], where *the engine* assigns into *our*
+/// slot and the slot must therefore be zeroed. Same rule, opposite directions.
+///
 /// # Safety
 /// `ret` must be storage of the right size for `Self`.
 pub unsafe trait IntoPtrcallRet {
     /// # Safety
-    /// `ret` must be storage of the right size for `Self`, or null when the engine wants no
+    /// `ret` must reference an initialized value of `Self`, or be null when the engine wants no
     /// return value.
     unsafe fn into_ret(self, ret: sys::GDExtensionTypePtr);
 }
@@ -117,7 +132,7 @@ pub unsafe trait IntoPtrcallRet {
 unsafe impl<T> IntoPtrcallRet for T {
     unsafe fn into_ret(self, ret: sys::GDExtensionTypePtr) {
         if !ret.is_null() {
-            std::ptr::write(ret as *mut T, self);
+            *(ret as *mut T) = self;
         }
     }
 }

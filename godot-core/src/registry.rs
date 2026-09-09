@@ -13,6 +13,12 @@ pub trait GodotClass: Sized + 'static {
     /// Name of the engine class to inherit from, e.g. `"Node"` or `"RefCounted"`.
     const BASE_NAME: &'static str;
 
+    /// Every virtual this class overrides, spelled the way the engine spells it (`_ready`).
+    ///
+    /// Only used to diagnose names the base class does not have; dispatch itself goes through
+    /// [`Self::virtual_trampoline`].
+    const VIRTUAL_NAMES: &'static [&'static str] = &[];
+
     /// When true, the class exists only while the game is running, not in the editor.
     ///
     /// GDExtension classes are editor-visible by default -- unlike GDScript, which needs
@@ -479,6 +485,9 @@ pub unsafe fn register_class<T: GodotClass>() {
 
     // Methods can only be attached once the class exists in ClassDB, and a property refers to
     // its accessors by name, so it has to come after them.
+    // After registration, so the class itself is in ClassDB and the engine can answer.
+    check_virtual_names::<T>();
+
     T::register_methods();
     T::register_signals();
     T::register_properties();
@@ -491,4 +500,79 @@ pub unsafe fn register_class<T: GodotClass>() {
 pub unsafe fn unregister_class<T: GodotClass>() {
     let class_name = StringName::new(T::CLASS_NAME);
     sys::interface_fn!(classdb_unregister_extension_class)(sys::library(), class_name.as_ptr());
+}
+
+/// Reports `#[godot_virtual]` methods whose names the base class does not have.
+///
+/// Godot resolves virtuals by name and simply never asks for one it does not recognise, so a
+/// misspelling produces a class that registers cleanly, runs, and silently does nothing. That is
+/// tolerable for `_ready`; it is not for `_forward_canvas_force_draw_over_viewport`.
+///
+/// The engine is the authority here rather than a table generated alongside the bindings: a
+/// generated table can be wrong, and a wrong table rejects correct code, which is worse than the
+/// silence it set out to fix. `class_get_method_list` is what the engine itself consults.
+///
+/// Note that `class_has_method` cannot be used -- virtuals are not callable methods and it
+/// answers `false` for every one of them. Only the method *list* includes them.
+unsafe fn check_virtual_names<T: GodotClass>() {
+    if T::VIRTUAL_NAMES.is_empty() {
+        return;
+    }
+
+    let Some(known) = base_virtuals(T::BASE_NAME) else {
+        // No list means the engine could not be asked (a base class registered later, say).
+        // Staying quiet is right: a diagnostic nobody can act on is worse than none.
+        return;
+    };
+
+    for name in T::VIRTUAL_NAMES {
+        if !known.iter().any(|k| k == name) {
+            crate::logging::godot_error(&format!(
+                "{}: `{}` is not a virtual method of {}, so Godot will never call it. \
+                 Check the spelling against the {} documentation.",
+                T::CLASS_NAME,
+                name,
+                T::BASE_NAME,
+                T::BASE_NAME,
+            ));
+        }
+    }
+}
+
+/// Every method name the engine lists for `class`, including inherited ones.
+unsafe fn base_virtuals(class: &str) -> Option<Vec<String>> {
+    use crate::builtin::{FromGodot, ToGodot, Variant, VariantArray};
+    use crate::ptrcall::MethodBind;
+
+    static METHOD: std::sync::OnceLock<MethodBind> = std::sync::OnceLock::new();
+    let method = METHOD.get_or_init(|| {
+        MethodBind::resolve(
+            "ClassDB",
+            "class_get_method_list",
+            sys::method_hashes::CLASSDB_CLASS_GET_METHOD_LIST,
+        )
+    });
+
+    let singleton_name = StringName::new("ClassDB");
+    let singleton = sys::interface_fn!(global_get_singleton)(singleton_name.as_ptr());
+    if singleton.is_null() {
+        return None;
+    }
+
+    // `no_inheritance = false`: a class may legitimately override a virtual it inherits, so the
+    // whole chain counts.
+    let args = [GString::new(class).to_variant(), false.to_variant()];
+    let result = method.varcall(singleton, &args).ok()?;
+    let list = VariantArray::try_from_variant(&result)?;
+
+    let key = GString::new("name").to_variant();
+    let empty = Variant::nil();
+    let mut names = Vec::with_capacity(list.size() as usize);
+    for i in 0..list.size() {
+        let entry = crate::builtin::Dictionary::try_from_variant(&list.get(i))?;
+        if let Some(name) = GString::try_from_variant(&entry.get(&key, &empty)) {
+            names.push(name.to_rust_string());
+        }
+    }
+    Some(names)
 }

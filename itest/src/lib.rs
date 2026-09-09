@@ -260,6 +260,59 @@ impl RustTestNode {
         GString::new("RustTestNode!")
     }
 
+    /// The only virtual whose return value is neither `()` nor `Copy`. The engine only asks for
+    /// it in the editor, so the editor suite is where it actually fires; here it exists so the
+    /// trampoline for a non-`Copy` return type is at least generated and registered.
+    #[godot_virtual]
+    fn get_configuration_warnings(&mut self) -> PackedStringArray {
+        let mut warnings = PackedStringArray::new();
+        warnings.push(&GString::new("first warning"));
+        warnings.push(&GString::new("second warning"));
+        warnings
+    }
+
+    /// Stands in for the engine on the virtual-return path.
+    ///
+    /// No engine virtual that returns an owned builtin can be triggered from a running game --
+    /// virtuals are not in ClassDB's callable method table, so GDScript cannot invoke one, and
+    /// the only two on `Node` that qualify are editor-only. So this drives the real
+    /// `IntoPtrcallRet` with a slot built the way `GDVIRTUAL_CALL` builds one: default
+    /// constructed, then holding a value the callee is required to release.
+    ///
+    /// Returns the number of entries the slot ends up with, so a wrong answer is visible; the
+    /// leak that `ptr::write` would cause is not visible here and is measured by the caller
+    /// watching memory across many iterations.
+    #[func]
+    fn probe_virtual_return(&mut self, iterations: i64) -> i64 {
+        use godot::godot_core::virtuals::IntoPtrcallRet;
+
+        let mut last = -1;
+        for _ in 0..iterations {
+            // The engine's slot: default-constructed, then carrying a value with a heap
+            // allocation behind it. Assigning releases it; overwriting leaks it.
+            let mut slot = PackedStringArray::new();
+            slot.push(&GString::new(
+                "the engine's own value, which must be released",
+            ));
+
+            let mut ours = PackedStringArray::new();
+            ours.push(&GString::new("first warning"));
+            ours.push(&GString::new("second warning"));
+
+            // SAFETY: `slot` is an initialized value of exactly this type, which is what the
+            // engine guarantees for a virtual's return slot.
+            unsafe {
+                ours.into_ret(&mut slot as *mut PackedStringArray as sys::GDExtensionTypePtr);
+            }
+
+            last = slot.size();
+            if last != 2 || slot.get(0).to_rust_string() != "first warning" {
+                return -1;
+            }
+        }
+        last
+    }
+
     /// Godot's `_notification`, which has its own slot rather than going through the by-name
     /// dispatch. Records the notifications the engine sends while entering the tree.
     #[godot_virtual]

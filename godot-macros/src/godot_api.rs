@@ -128,6 +128,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     });
 
     let virtual_trampolines = virtuals.iter().map(trampoline_for);
+    // Names only, for the registration-time check that the base class actually has them.
+    let virtual_names = virtuals.iter().map(|v| &v.godot_name);
+
     let virtual_arms = virtuals.iter().map(|v| {
         let godot_name = &v.godot_name;
         let tramp = &v.trampoline_ident;
@@ -271,6 +274,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             #get_forward
             #set_forward
             #property_list_forward
+
+            const VIRTUAL_NAMES: &'static [&'static str] = &[#(#virtual_names),*];
 
             fn virtual_trampoline(
                 name: &str,
