@@ -214,7 +214,8 @@ Built and covered by the integration tests:
 - Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
   than a bare integer
 - Default arguments: a method with defaults gets a short form taking only the required
-  arguments, plus an `_ex` form taking all of them
+  arguments, plus an `_ex` form taking all of them. Object arguments that default to null are
+  `Option<&Gd<T>>` in the full form, so the null is expressible rather than only omittable.
 - Panics in user code are caught at the FFI boundary and reported through Godot's error output.
   Unwinding out of an `extern "C"` callback is undefined behaviour and aborts in practice, which
   would take the editor down with any unsaved work.
@@ -231,8 +232,6 @@ Built and covered by the integration tests:
 
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
-- Object parameters that are optional in Godot are generated as required, so a method like
-  `add_control_to_dock` has no way to pass the null its `shortcut` argument defaults to
 - Windows, Android and iOS are not covered by CI
 - No API compatibility with the `gdnative` crate — Godot 3 code must be rewritten
 

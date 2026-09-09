@@ -105,6 +105,12 @@ func test_virtuals() -> void:
 	check(leaked < 1_000_000,
 		"the virtual return path leaked %s bytes over 200k calls" % leaked)
 
+	# An object argument Godot documents as optional can be left out: `create_item()` with no
+	# parent makes the root, `create_item_ex(root, -1)` makes a child of it.
+	check(virtual_node.optional_object_argument() == 1,
+		"an optional object argument did not behave as null, got %s"
+			% virtual_node.optional_object_argument())
+
 	# An object built by Gd::new must be finished, not merely constructed: the interface
 	# requires NOTIFICATION_POSTINITIALIZE after construction, and an object that never got it
 	# behaves normally right up until the engine puts it in the tree.

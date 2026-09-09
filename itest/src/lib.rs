@@ -658,6 +658,39 @@ impl RustTestNode {
     }
 
     /// Whether the engine sent the given notification, and what `_set` last stored.
+    /// Whether an object argument Godot documents as optional can actually be left out.
+    ///
+    /// Godot's `PtrToArg<T*>` checks the argument pointer itself before dereferencing it, so a
+    /// null object is passed by passing no pointer at all -- there is nothing to construct. The
+    /// bindings spell that `Option<&Gd<T>>`, with the short form omitting the argument.
+    ///
+    /// `Tree::create_item` distinguishes the two: with no parent it creates the root, with one
+    /// it creates a child. Returns the root's child count, so passing something other than null
+    /// gives a different answer rather than merely not crashing.
+    #[func]
+    fn optional_object_argument(&mut self) -> i64 {
+        let Some(tree) = Gd::<classes::Tree>::new() else {
+            return -1;
+        };
+
+        // No parent: this becomes the tree's root.
+        let Some(root) = tree.create_item() else {
+            unsafe { tree.free() };
+            return -2;
+        };
+
+        // With a parent: a child of the root.
+        let child = tree.create_item_ex(Some(&root), -1);
+        let count = if child.is_some() {
+            i64::from(root.clone().get_child_count())
+        } else {
+            -3
+        };
+
+        unsafe { tree.free() };
+        count
+    }
+
     /// Adds a freshly built engine object to the live scene tree.
     ///
     /// `classdb_construct_object` builds an object but leaves it to the caller to send

@@ -10,7 +10,7 @@
 //! there makes the extension fail to load.
 
 use godot::classes::{
-    Control, EditorInterface, EditorPlugin, EditorPluginDockSlot, Engine, Label, Object, Shortcut,
+    Control, EditorInterface, EditorPlugin, EditorPluginDockSlot, Engine, Label, Object,
 };
 use godot::editor::{add_editor_plugin, remove_editor_plugin};
 use godot::prelude::*;
@@ -95,15 +95,10 @@ impl SceneNamePlugin {
         label.set_name(&StringName::new("Scene Name"));
         label.set_text(&GString::new("(no scene open)"));
 
-        // `shortcut` is optional in Godot and defaults to null, but the bindings generate every
-        // object parameter as required, so there is nothing to pass but an empty one.
-        let no_shortcut = Gd::<Shortcut>::new().expect("Shortcut is a registered engine class");
-
-        self.plugin().add_control_to_dock(
-            EditorPluginDockSlot(DOCK_SLOT_LEFT_UL),
-            label.upcast_ref(),
-            &no_shortcut,
-        );
+        // `shortcut` defaults to null in Godot, so the short form leaves it out entirely;
+        // `add_control_to_dock_ex` takes it as an `Option`.
+        self.plugin()
+            .add_control_to_dock(EditorPluginDockSlot(DOCK_SLOT_LEFT_UL), label.upcast_ref());
 
         self.label = Some(label);
         self.refresh();

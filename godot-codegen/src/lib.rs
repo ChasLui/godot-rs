@@ -218,6 +218,7 @@ fn generate_method(
     let mut arg_names = Vec::new();
     let mut arg_types = Vec::new();
     let mut arg_defaults = Vec::new();
+    let mut arg_optional = Vec::new();
     for arg in &method.arguments {
         let ty = map_type_with(&arg.type_, arg.meta.as_deref(), is_class, is_global_enum)?;
         if !all_classes_available(&ty, selected) {
@@ -226,11 +227,20 @@ fn generate_method(
         if ty == RustTy::Void {
             return None;
         }
-        arg_defaults.push(
+        // An object argument that Godot documents as defaulting to null. Its Rust type becomes
+        // `Option<&Gd<T>>` so the null is expressible: the engine's own conversion checks the
+        // argument pointer for null before reading through it, so `None` needs no object at all.
+        let optional_object =
+            matches!(ty, RustTy::Object(_)) && arg.default_value.as_deref() == Some("null");
+
+        arg_defaults.push(if optional_object {
+            Some(quote!(None))
+        } else {
             arg.default_value
                 .as_deref()
-                .and_then(|raw| default_value_expr(&ty, raw)),
-        );
+                .and_then(|raw| default_value_expr(&ty, raw))
+        });
+        arg_optional.push(optional_object);
         arg_names.push(format_ident!("{}", rust_safe_name(&arg.name)));
         arg_types.push(ty);
     }
@@ -242,18 +252,34 @@ fn generate_method(
     let params: Vec<TokenStream> = arg_names
         .iter()
         .zip(&arg_types)
-        .map(|(name, ty)| {
+        .zip(&arg_optional)
+        .map(|((name, ty), optional)| {
             let ty_tokens = ty.arg_tokens();
-            quote!(#name: #ty_tokens)
+            if *optional {
+                quote!(#name: ::std::option::Option<#ty_tokens>)
+            } else {
+                quote!(#name: #ty_tokens)
+            }
         })
         .collect();
 
     let arg_ptrs: Vec<TokenStream> = arg_names
         .iter()
         .zip(&arg_types)
-        .map(|(name, ty)| {
-            // By-ref parameters are already references; by-value ones need addressing.
-            if ty.is_by_ref() {
+        .zip(&arg_optional)
+        .map(|((name, ty), optional)| {
+            // A null argument pointer *is* how Godot receives a null object: `PtrToArg<T*>`
+            // checks the pointer before dereferencing it, so `None` passes null rather than
+            // pointing at a null handle.
+            if *optional {
+                quote! {
+                    match #name {
+                        Some(__godot_obj) => ::godot_core::ptrcall::PtrcallArg::arg_ptr(__godot_obj),
+                        None => ::std::ptr::null(),
+                    }
+                }
+            } else if ty.is_by_ref() {
+                // By-ref parameters are already references; by-value ones need addressing.
                 quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(#name))
             } else {
                 quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(&#name))
