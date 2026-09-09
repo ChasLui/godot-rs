@@ -103,7 +103,6 @@ pub unsafe fn register_property<T: GodotClass>(
     );
 }
 
-// From `global_enums` in extension_api.json, verified against the vendored 4.7.2 dump.
-const PROPERTY_HINT_NONE: u32 = 0;
-const PROPERTY_USAGE_DEFAULT: u32 = 6;
-const PROPERTY_USAGE_NIL_IS_VARIANT: u32 = 131072;
+pub(crate) use crate::property_flags::{
+    PROPERTY_HINT_NONE, PROPERTY_USAGE_DEFAULT, PROPERTY_USAGE_NIL_IS_VARIANT,
+};

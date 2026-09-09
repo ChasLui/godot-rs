@@ -1,4 +1,5 @@
 use crate::builtin::{GString, StringName};
+use crate::property_flags::PROPERTY_USAGE_DEFAULT;
 use godot_sys as sys;
 
 /// A Rust type that is registered with Godot's ClassDB as a native class.
@@ -51,6 +52,14 @@ pub trait GodotClass: Sized + 'static {
     /// Returns whether the write was handled; `false` lets the engine try elsewhere.
     fn godot_set(&mut self, _property: &str, _value: &crate::builtin::Variant) -> bool {
         false
+    }
+
+    /// Godot's `_get_property_list`: declares the dynamic properties.
+    ///
+    /// Without this, [`Self::godot_get`] and [`Self::godot_set`] still work from code, but the
+    /// properties are invisible to the editor and to reflection.
+    fn godot_get_property_list(&mut self) -> Vec<PropertyDesc> {
+        Vec::new()
     }
 
     /// Resolves a virtual method Godot asks for, by its engine name (`"_ready"`, `"_input"`).
@@ -212,6 +221,131 @@ unsafe extern "C" fn to_string<T: GodotClass>(
     }
 }
 
+/// One entry of a dynamic property list.
+pub struct PropertyDesc {
+    pub name: String,
+    /// A `GDEXTENSION_VARIANT_TYPE_*` value; see `godot_sys`.
+    pub variant_type: sys::GDExtensionVariantType,
+    pub hint: u32,
+    pub hint_string: String,
+    pub usage: u32,
+}
+
+impl PropertyDesc {
+    /// A plainly stored and editable property of the given type.
+    pub fn new(name: &str, variant_type: sys::GDExtensionVariantType) -> Self {
+        Self {
+            name: name.to_string(),
+            variant_type,
+            hint: 0,
+            hint_string: String::new(),
+            usage: PROPERTY_USAGE_DEFAULT,
+        }
+    }
+}
+
+/// Backing storage for one property list handed to the engine.
+///
+/// `GDExtensionPropertyInfo` holds bare pointers into StringNames and Strings, so those must
+/// outlive the array itself -- until `free_property_list` says the engine is done with it.
+struct PropertyListStorage {
+    /// Never read back -- held so the array the engine is using stays allocated.
+    _infos: Vec<sys::GDExtensionPropertyInfo>,
+    _strings: Vec<(StringName, StringName, GString)>,
+}
+
+thread_local! {
+    /// Live property lists, keyed by the array pointer the engine was given.
+    ///
+    /// The engine hands back only that pointer, so the strings cannot be reached from it
+    /// directly; this map is what connects the two. Single-threaded, like every other engine
+    /// callback.
+    static PROPERTY_LISTS: std::cell::RefCell<
+        std::collections::HashMap<usize, PropertyListStorage>,
+    > = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+unsafe extern "C" fn get_property_list<T: GodotClass>(
+    instance: sys::GDExtensionClassInstancePtr,
+    count: *mut u32,
+) -> *const sys::GDExtensionPropertyInfo {
+    if !count.is_null() {
+        *count = 0;
+    }
+    if instance.is_null() {
+        return std::ptr::null();
+    }
+
+    let this = &mut *(instance as *mut T);
+    let descs = this.godot_get_property_list();
+    if descs.is_empty() {
+        return std::ptr::null();
+    }
+
+    let mut strings = Vec::with_capacity(descs.len());
+    for desc in &descs {
+        strings.push((
+            StringName::new(&desc.name),
+            StringName::new(""),
+            GString::new(&desc.hint_string),
+        ));
+    }
+
+    let infos: Vec<sys::GDExtensionPropertyInfo> = descs
+        .iter()
+        .zip(strings.iter_mut())
+        .map(
+            |(desc, (name, class_name, hint_string))| sys::GDExtensionPropertyInfo {
+                type_: desc.variant_type,
+                name: name.as_mut_ptr(),
+                class_name: class_name.as_mut_ptr(),
+                hint: desc.hint,
+                hint_string: hint_string.as_mut_ptr(),
+                usage: desc.usage,
+            },
+        )
+        .collect();
+
+    let ptr = infos.as_ptr();
+    if !count.is_null() {
+        *count = infos.len() as u32;
+    }
+
+    PROPERTY_LISTS.with(|lists| {
+        lists.borrow_mut().insert(
+            ptr as usize,
+            PropertyListStorage {
+                _infos: infos,
+                _strings: strings,
+            },
+        );
+    });
+
+    ptr
+}
+
+unsafe extern "C" fn free_property_list(
+    _instance: sys::GDExtensionClassInstancePtr,
+    list: *const sys::GDExtensionPropertyInfo,
+    _count: u32,
+) {
+    if list.is_null() {
+        return;
+    }
+    // Dropping the storage releases both the array and the strings it points into.
+    PROPERTY_LISTS.with(|lists| {
+        lists.borrow_mut().remove(&(list as usize));
+    });
+}
+
+/// How many property lists the engine has asked for and not yet released.
+///
+/// Should return to zero once the engine is done with them; a number that only grows is a leak
+/// in `free_property_list`.
+pub fn live_property_list_count() -> usize {
+    PROPERTY_LISTS.with(|lists| lists.borrow().len())
+}
+
 unsafe extern "C" fn notification<T: GodotClass>(
     instance: sys::GDExtensionClassInstancePtr,
     what: i32,
@@ -288,6 +422,8 @@ pub unsafe fn register_class<T: GodotClass>() {
     info.notification_func = Some(notification::<T>);
     info.get_func = Some(get_property::<T>);
     info.set_func = Some(set_property::<T>);
+    info.get_property_list_func = Some(get_property_list::<T>);
+    info.free_property_list_func = Some(free_property_list);
     info.create_instance_func = Some(create_instance::<T>);
     info.free_instance_func = Some(free_instance::<T>);
     info.recreate_instance_func = Some(recreate_instance::<T>);

@@ -19,7 +19,7 @@ pub mod prelude {
     pub use crate::init::{ExtensionLibrary, InitLevel};
     pub use crate::method::{register_method, MethodDecl};
     pub use crate::obj::{Gd, GodotObject};
-    pub use crate::registry::{register_class, unregister_class, GodotClass};
+    pub use crate::registry::{register_class, unregister_class, GodotClass, PropertyDesc};
     pub use crate::signal::{register_property, register_signal};
     pub use crate::task::{frames, next_frame, AsyncRuntime};
     pub use godot_core::{godot_entry, godot_error, godot_print, godot_print_err, godot_warn};

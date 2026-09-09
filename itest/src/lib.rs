@@ -266,6 +266,21 @@ impl RustTestNode {
             .map(|rest| GString::new(&format!("got:{rest}")).to_variant())
     }
 
+    /// Declares the dynamic properties, so the editor and reflection can see them.
+    #[godot_virtual]
+    fn get_property_list(&mut self) -> Vec<PropertyDesc> {
+        vec![
+            PropertyDesc::new(
+                "dynamic_speed",
+                godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+            ),
+            PropertyDesc::new(
+                "dynamic_sink",
+                godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_INT,
+            ),
+        ]
+    }
+
     #[godot_virtual]
     fn set(&mut self, property: &str, value: &Variant) -> bool {
         if property == "dynamic_sink" {
@@ -334,6 +349,12 @@ impl RustTestNode {
     #[func]
     fn async_progress(&mut self) -> i64 {
         ASYNC_RESULT.with(|r| r.get())
+    }
+
+    /// Property lists the engine has requested and not released. A leak shows up as growth.
+    #[func]
+    fn live_property_lists(&mut self) -> i64 {
+        godot::registry::live_property_list_count() as i64
     }
 
     /// Whether the engine sent the given notification, and what `_set` last stored.

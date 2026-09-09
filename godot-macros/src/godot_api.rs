@@ -21,6 +21,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let mut has_notification = false;
     let mut has_get = false;
     let mut has_set = false;
+    let mut has_property_list = false;
 
     // Collect the marked methods and strip the marker attributes, so the original `impl` block
     // still compiles as ordinary Rust.
@@ -63,6 +64,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 "notification" => has_notification = true,
                 "get" => has_get = true,
                 "set" => has_set = true,
+                "get_property_list" => has_property_list = true,
                 _ => virtuals.push(parse_virtual(method)?),
             }
         }
@@ -190,6 +192,18 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         quote!()
     };
 
+    let property_list_forward = if has_property_list {
+        quote! {
+            fn godot_get_property_list(
+                &mut self,
+            ) -> ::std::vec::Vec<::godot::godot_core::registry::PropertyDesc> {
+                <Self>::get_property_list(self)
+            }
+        }
+    } else {
+        quote!()
+    };
+
     let base_name = base.to_string();
 
     Ok(quote! {
@@ -241,6 +255,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             #notification_forward
             #get_forward
             #set_forward
+            #property_list_forward
 
             fn virtual_trampoline(
                 name: &str,

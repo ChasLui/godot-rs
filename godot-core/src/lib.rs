@@ -10,6 +10,16 @@ extern crate self as godot_core;
 pub mod builtin;
 pub mod init;
 pub mod logging;
+
+/// Property flags from `global_enums` in the API dump, needed before the generated enums exist.
+///
+/// `godot-core` cannot name `godot_bindings::global`, so the handful it uses live here.
+pub(crate) mod property_flags {
+    pub const PROPERTY_HINT_NONE: u32 = 0;
+    pub const PROPERTY_USAGE_DEFAULT: u32 = 6;
+    pub const PROPERTY_USAGE_NIL_IS_VARIANT: u32 = 131072;
+}
+
 pub mod method;
 pub mod obj;
 pub mod ptrcall;

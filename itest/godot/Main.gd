@@ -100,6 +100,24 @@ func test_virtuals() -> void:
 	check(virtual_node.dynamic_sink_value() == 77,
 		"_set did not receive the value, got %d" % virtual_node.dynamic_sink_value())
 
+	# _get_property_list makes the dynamic properties visible to reflection, which is the same
+	# data the editor's Inspector reads. Without it _get/_set still work but nothing lists them.
+	var dyn_names: Array[String] = []
+	for p in virtual_node.get_property_list():
+		dyn_names.append(p["name"])
+	check(dyn_names.has("dynamic_speed"),
+		"dynamic_speed missing from get_property_list()")
+	check(dyn_names.has("dynamic_sink"),
+		"dynamic_sink missing from get_property_list()")
+
+	# Each requested list must be released. The binding keeps live lists in a map, so a missing
+	# free shows up as growth there rather than as silent memory loss.
+	for i in range(50):
+		var _ignored := virtual_node.get_property_list()
+	check(virtual_node.live_property_lists() == 0,
+		"%d property lists were never released by the engine"
+			% virtual_node.live_property_lists())
+
 	# A virtual with a return value, reached through Godot's own str().
 	check(str(virtual_node) == "RustTestNode!",
 		"_to_string returned %s" % str(virtual_node))
