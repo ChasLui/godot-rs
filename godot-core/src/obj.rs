@@ -287,3 +287,72 @@ impl<T: GodotObject> std::fmt::Debug for Gd<T> {
         write!(f, "Gd<{}>({:?})", T::CLASS_NAME, self.ptr)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A stand-in class marker, shaped like the generated ones.
+    #[repr(C)]
+    struct FakeClass {
+        _opaque: [u8; 0],
+    }
+
+    unsafe impl GodotObject for FakeClass {
+        const CLASS_NAME: &'static str = "FakeClass";
+        const IS_REFCOUNTED: bool = false;
+    }
+
+    /// `Gd` must stay pointer-sized and pointer-aligned: the generated code hands its address
+    /// to the engine where an object pointer is expected, and reads one back out.
+    #[test]
+    fn gd_is_a_bare_pointer() {
+        assert_eq!(
+            std::mem::size_of::<Gd<FakeClass>>(),
+            std::mem::size_of::<*mut u8>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Gd<FakeClass>>(),
+            std::mem::align_of::<*mut u8>()
+        );
+    }
+
+    /// Class markers carry no data. If one ever gained a field, `Deref` would hand out a
+    /// reference to memory that is really the `Gd`'s pointer.
+    #[test]
+    fn class_markers_are_zero_sized() {
+        assert_eq!(std::mem::size_of::<FakeClass>(), 0);
+    }
+
+    /// The whole method-call scheme rests on this: dereferencing a `Gd` yields a reference at
+    /// the `Gd`'s own address, so a method holding `&self` can read the object pointer back.
+    #[test]
+    fn deref_lands_on_the_gd_itself() {
+        let sentinel = 0x1234_5678_usize as sys::GDExtensionObjectPtr;
+        let gd: Gd<FakeClass> = Gd {
+            ptr: sentinel,
+            _marker: std::marker::PhantomData,
+        };
+
+        let as_class: &FakeClass = &gd;
+        assert_eq!(
+            as_class as *const FakeClass as usize, &gd as *const Gd<FakeClass> as usize,
+            "Deref moved away from the Gd, so obj_ptr_from_ref would read the wrong memory"
+        );
+
+        // SAFETY: `as_class` came from dereferencing a live `Gd`, which is the contract.
+        let recovered = unsafe { obj_ptr_from_ref(as_class) };
+        assert_eq!(
+            recovered, sentinel,
+            "the object pointer did not survive the round trip"
+        );
+    }
+
+    /// A null handle is rejected rather than becoming a `Gd` that would fault on first use.
+    #[test]
+    fn null_is_not_a_handle() {
+        // SAFETY: passing null is exactly the case being checked.
+        let gd = unsafe { Gd::<FakeClass>::from_obj_ptr(std::ptr::null_mut()) };
+        assert!(gd.is_none());
+    }
+}

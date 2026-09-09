@@ -227,3 +227,46 @@ impl MethodBind {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `arg_ptr` must hand over the address of the value, not the value. Getting this backwards
+    /// for a pointer-shaped type crashes the engine rather than failing to compile.
+    #[test]
+    fn arg_ptr_is_the_address_of_the_value() {
+        let value: i64 = 42;
+        let ptr = PtrcallArg::arg_ptr(&value);
+        assert_eq!(ptr as usize, &value as *const i64 as usize);
+
+        // SAFETY: `ptr` addresses `value`, which is still alive.
+        assert_eq!(unsafe { *(ptr as *const i64) }, 42);
+    }
+
+    /// A raw pointer argument follows the same rule, which is the part that is easy to get
+    /// wrong: the engine wants the address of the pointer, not the pointer.
+    #[test]
+    fn raw_pointer_arg_passes_its_own_address() {
+        let target: u32 = 7;
+        let value: *const std::ffi::c_void = &target as *const u32 as *const std::ffi::c_void;
+
+        let ptr = PtrcallArg::arg_ptr(&value);
+        assert_eq!(
+            ptr as usize,
+            &value as *const *const std::ffi::c_void as usize
+        );
+
+        // SAFETY: reading back the pointer that was passed, then what it addresses.
+        unsafe {
+            let inner = *(ptr as *const *const std::ffi::c_void);
+            assert_eq!(*(inner as *const u32), 7);
+        }
+    }
+
+    // There is deliberately no test that the return slot is zeroed. Uninitialised stack memory
+    // is very often zero already, so such a test passes whether the code reads `zeroed()` or
+    // `uninit()` -- it cannot fail, and a test that cannot fail is worse than no test. What the
+    // engine actually does with the slot is covered by the integration tests, which crash if this
+    // ever regresses.
+}

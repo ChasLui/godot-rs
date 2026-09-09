@@ -369,3 +369,77 @@ impl Rid {
         self.id != 0
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The sizes are asserted at compile time against the engine's own numbers; this checks the
+    /// other half, that the fields sit where the engine says and in the order it expects.
+    ///
+    /// A reordered field would still compile and still be the right size, and would silently
+    /// scramble every value crossing the boundary.
+    #[test]
+    fn field_order_matches_the_engine() {
+        // Built field by *name*, never by constructor: a constructor takes its arguments in
+        // declaration order, so `new(1.0, 2.0, 3.0)` would follow a reordering and the check
+        // would pass no matter what the order became.
+        let v = Vector3 {
+            x: 1.0,
+            y: 2.0,
+            z: 3.0,
+        };
+        let raw = unsafe { std::slice::from_raw_parts(&v as *const Vector3 as *const Real, 3) };
+        assert_eq!(
+            raw,
+            &[1.0, 2.0, 3.0][..],
+            "Vector3 fields are not in x, y, z order"
+        );
+
+        let c = Color {
+            r: 0.1,
+            g: 0.2,
+            b: 0.3,
+            a: 0.4,
+        };
+        let raw = unsafe { std::slice::from_raw_parts(&c as *const Color as *const f32, 4) };
+        assert_eq!(
+            raw,
+            &[0.1, 0.2, 0.3, 0.4][..],
+            "Color fields are not in r, g, b, a order"
+        );
+
+        // Composites: a Transform2D is three Vector2s, laid out end to end.
+        let t = Transform2D {
+            x: Vector2 { x: 1.0, y: 2.0 },
+            y: Vector2 { x: 3.0, y: 4.0 },
+            origin: Vector2 { x: 5.0, y: 6.0 },
+        };
+        let raw = unsafe { std::slice::from_raw_parts(&t as *const Transform2D as *const Real, 6) };
+        assert_eq!(raw, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0][..]);
+    }
+
+    /// The maths is inlined in Rust rather than dispatched to the engine, so it is worth a check
+    /// of its own.
+    #[test]
+    fn vector_maths() {
+        assert_eq!(Vector2::new(3.0, 4.0).length(), 5.0);
+        assert_eq!(Vector2::new(3.0, 4.0).normalized().length(), 1.0);
+        assert_eq!(Vector2::new(1.0, 2.0).dot(Vector2::new(3.0, 4.0)), 11.0);
+
+        // Cross of the unit x and y axes is the unit z axis.
+        let z = Vector3::new(1.0, 0.0, 0.0).cross(Vector3::new(0.0, 1.0, 0.0));
+        assert_eq!(z, Vector3::new(0.0, 0.0, 1.0));
+
+        // A zero vector has no direction to normalise towards; Godot returns zero rather than
+        // NaN, and so must this.
+        assert_eq!(Vector2::ZERO.normalized(), Vector2::ZERO);
+        assert_eq!(Vector3::ZERO.normalized(), Vector3::ZERO);
+    }
+
+    #[test]
+    fn rid_validity() {
+        assert!(!Rid::INVALID.is_valid());
+        assert!(Rid::new(1).is_valid());
+    }
+}
