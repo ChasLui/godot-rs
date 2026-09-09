@@ -256,6 +256,16 @@ func test_rust_side_connect() -> void:
 	check(n.last_signal_value() == 8,
 		"signal argument was %d, expected the second emit's 8" % n.last_signal_value())
 
+	# A closure needs no registered method behind it. Two emits carrying 3 and 4 must accumulate.
+	var closure_sum: int = n.connect_closure_and_emit()
+	check(closure_sum == 7,
+		"closure callable summed to %d, expected 7 (a negative means connect failed)"
+			% closure_sum)
+
+	# The closure must be dropped with the callable, not leaked: 5 guards created, 5 dropped.
+	check(n.closure_drop_count(5) == 5,
+		"closure captures dropped %d times, expected 5" % n.closure_drop_count(5))
+
 	n.free()
 	done("rust_side_connect")
 

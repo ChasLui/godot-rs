@@ -150,7 +150,8 @@ Built and covered by the integration tests:
   - math: `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,
     `Quaternion`, `Plane`, `AABB`, `Projection`, `Rid`
   - containers: `VariantArray`, `Dictionary`, `TypedArray<T>`, and all ten `Packed*Array` types
-  - callables: `Callable`, `Signal` -- so signals can be connected from Rust, not only GDScript
+  - callables: `Callable`, `Signal` -- from a registered method or from a Rust closure, so
+    signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting
 - Generated bindings for every non-editor engine class -- 954 classes, ~14,800 methods --
   called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
@@ -166,8 +167,6 @@ Built and covered by the integration tests:
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
-- Callables built from a Rust closure; `Callable` currently references a registered method
-  by name.
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
 - `EditorPlugin` beyond registration; no editor UI integration

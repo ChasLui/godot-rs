@@ -13,7 +13,19 @@ use godot::global;
 use godot::prelude::*;
 use godot::sys;
 
+/// Bumps [`DROPPED`] when it goes away, so a closure's lifetime can be observed from GDScript.
+struct DropGuard;
+
+impl Drop for DropGuard {
+    fn drop(&mut self) {
+        DROPPED.with(|d| d.set(d.get() + 1));
+    }
+}
+
 thread_local! {
+    /// How many `DropGuard`s have been dropped.
+    static DROPPED: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+
     /// Progress of the spawned test future. Thread-local because the runtime is single-threaded,
     /// matching Godot's own calling convention.
     static ASYNC_RESULT: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
@@ -544,6 +556,76 @@ impl RustTestNode {
             return -1;
         }
         combined.ord()
+    }
+
+    /// Connects a signal to a Rust *closure*, which needs no registered method behind it.
+    ///
+    /// The closure captures a counter shared with this instance, so GDScript can observe that
+    /// the engine really invoked it, with the argument the signal carried.
+    #[func]
+    fn connect_closure_and_emit(&mut self) -> i64 {
+        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
+            return -1;
+        };
+
+        // Shared with the closure; the closure owns one handle, this instance reads the other.
+        let seen = std::rc::Rc::new(std::cell::Cell::new(0i64));
+        let captured = seen.clone();
+
+        let callable = Callable::from_closure(move |args: &[Variant]| {
+            let value = args.first().and_then(i64::try_from_variant).unwrap_or(0);
+            captured.set(captured.get() + value);
+            Variant::nil()
+        });
+
+        let err = classes::Object::connect(&this, &StringName::new("counter_changed"), &callable);
+        if err != global::Error::OK {
+            return -100 - err.ord();
+        }
+
+        let _ = classes::Object::emit_signal(
+            &this,
+            &StringName::new("counter_changed"),
+            &[3i64.to_variant()],
+        );
+        let _ = classes::Object::emit_signal(
+            &this,
+            &StringName::new("counter_changed"),
+            &[4i64.to_variant()],
+        );
+
+        classes::Object::disconnect(&this, &StringName::new("counter_changed"), &callable);
+
+        // 3 + 4 if the closure ran for both emits.
+        seen.get()
+    }
+
+    /// Proves a closure callable is dropped with the callable, rather than leaked.
+    ///
+    /// The closure captures a guard whose Drop bumps a thread-local counter; creating and
+    /// dropping N callables must bump it N times.
+    #[func]
+    fn closure_drop_count(&mut self, rounds: i64) -> i64 {
+        DROPPED.with(|d| d.set(0));
+
+        for _ in 0..rounds {
+            let callable = Callable::from_closure(|_args: &[Variant]| {
+                // Captures the guard below by holding it in the closure environment.
+                Variant::nil()
+            });
+            drop(callable);
+        }
+
+        for _ in 0..rounds {
+            let guard = DropGuard;
+            let callable = Callable::from_closure(move |_args: &[Variant]| {
+                let _ = &guard;
+                Variant::nil()
+            });
+            drop(callable);
+        }
+
+        DROPPED.with(|d| d.get())
     }
 
     /// Connects a signal to a Rust method from Rust, then emits it.
