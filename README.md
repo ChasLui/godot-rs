@@ -143,7 +143,11 @@ Built and covered by the integration tests:
 - Class registration, instantiation from GDScript and the editor
 - Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`)
 - Engine hooks: `_ready`, `_process`, `_physics_process`
-- `Variant` and the builtins: `GString`, `StringName`, `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`
+- `Variant` and the builtins:
+  - strings: `GString`, `StringName`, `NodePath`
+  - math: `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,
+    `Quaternion`, `Plane`, `AABB`, `Projection`, `Rid`
+  - containers: `VariantArray`, `Dictionary`, and all ten `Packed*Array` types
 - `Gd<T>` object handles with automatic reference counting
 - Generated bindings for a subset of the engine API, called through `ptrcall`, plus variadic
   methods (`emit_signal`, `call`, `rpc`) through the Variant path
@@ -152,11 +156,14 @@ Built and covered by the integration tests:
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
-- `Array`, `Dictionary`, `Packed*Array`, `Callable`, `Signal`, `Transform2D/3D`, `Basis`,
-  `Quaternion`, `Projection`, `Plane`, `AABB`, `RID`, `NodePath`
+- `Callable` and `Signal` as first-class types
+- Container element access beyond the basics: the `Packed*Array` types can be passed and
+  measured, but only `PackedStringArray` and `PackedByteArray` have `get`/`push` so far.
+  Builtin methods are hand-written rather than generated.
 - Only 106 of the engine's 1036 classes are generated (the closure of a seed set; see
   `godot-codegen/src/lib.rs`). The build prints how many methods were skipped.
-- Typed arrays, default arguments, engine enums as Rust types (they surface as `i64`)
+- Typed arrays (`typedarray::*`), default arguments, engine enums as Rust types (they surface
+  as `i64`)
 - `EditorPlugin` beyond registration; no editor UI integration
 - Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested
 - Windows, Android and iOS are not covered by CI

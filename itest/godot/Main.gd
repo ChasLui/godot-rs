@@ -19,6 +19,8 @@ func _ready() -> void:
 	test_properties()
 	test_signals()
 	test_init_levels()
+	test_math_builtins()
+	test_collections()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
 	call_deferred("start_virtual_test")
 	return
@@ -199,6 +201,61 @@ func test_init_levels() -> void:
 	check(n != null and n.marker() == 2, "runtime-only class did not work")
 	if n != null:
 		n.free()
+
+func test_math_builtins() -> void:
+	var n: Object = ClassDB.instantiate("RustTestNode")
+
+	# Every component distinct, so a wrong field order shows up as scrambled values rather
+	# than an accidental match.
+	var t := Transform2D(Vector2(1, 2), Vector2(3, 4), Vector2(5, 6))
+	check(n.echo_transform2d(t) == t, "Transform2D round trip, got %s" % n.echo_transform2d(t))
+
+	check(n.echo_vector3(Vector3(1.5, -2.5, 3.5)) == Vector3(1.5, -2.5, 3.5), "Vector3 round trip")
+	check(n.echo_color(Color(0.1, 0.2, 0.3, 0.4)).is_equal_approx(Color(0.1, 0.2, 0.3, 0.4)),
+		"Color round trip")
+
+	# Cross product of the unit X and Y axes is the unit Z axis, so the length is 1.
+	check(abs(n.vector3_cross_length(Vector3(1, 0, 0), Vector3(0, 1, 0)) - 1.0) < 0.0001,
+		"Vector3.cross computed in Rust")
+
+	n.free()
+
+func test_collections() -> void:
+	var n: Object = ClassDB.instantiate("RustTestNode")
+
+	# Array built in Rust, read in GDScript.
+	var arr: Array = n.make_array(4)
+	check(arr.size() == 4, "Rust-built Array size, got %d" % arr.size())
+	check(arr == [0, 10, 20, 30], "Rust-built Array contents, got %s" % [arr])
+
+	# Array built in GDScript, read in Rust.
+	check(n.sum_array([1, 2, 3, 4]) == 10, "Rust summed a GDScript Array")
+	check(n.sum_array([]) == 0, "Rust handled an empty Array")
+
+	var d: Dictionary = n.make_dictionary()
+	check(d.size() == 2, "Rust-built Dictionary size")
+	check(d.get("answer") == 42, "Dictionary int value")
+	check(d.get("name") == "rust", "Dictionary string value")
+	check(n.dictionary_lookup({"k": 7}, "k") == 7, "Rust read a GDScript Dictionary")
+	check(n.dictionary_lookup({"k": 7}, "missing") == -1, "Rust handled a missing key")
+
+	var sa: PackedStringArray = n.make_string_array()
+	check(sa.size() == 3, "PackedStringArray size")
+	check(sa[0] == "alpha" and sa[2] == "中文", "PackedStringArray contents, got %s" % [sa])
+	check(n.string_array_join(PackedStringArray(["a", "b"])) == "a|b",
+		"Rust read a GDScript PackedStringArray")
+
+	var ba: PackedByteArray = n.make_byte_array()
+	check(ba.size() == 3 and ba[2] == 255, "PackedByteArray contents, got %s" % [ba])
+
+	check(n.node_path_roundtrip("../Sibling/Child") == NodePath("../Sibling/Child"),
+		"NodePath round trip")
+
+	# Repeated create/clone/drop: a destructor mistake corrupts memory on a later round.
+	# 20 rounds x (1 array + 1 dict + 1 string array) = 60.
+	check(n.collection_churn(20) == 60, "collection churn, got %d" % n.collection_churn(20))
+
+	n.free()
 
 func test_reference_counting() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")

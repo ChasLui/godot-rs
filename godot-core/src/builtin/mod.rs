@@ -1,9 +1,18 @@
+mod collection;
 mod math;
 mod string;
 mod string_name;
 mod variant;
 
-pub use math::{Color, Real, Rect2, Rect2i, Vector2, Vector2i, Vector3, Vector3i, Vector4};
+pub use collection::{
+    Dictionary, NodePath, PackedByteArray, PackedColorArray, PackedFloat32Array,
+    PackedFloat64Array, PackedInt32Array, PackedInt64Array, PackedStringArray, PackedVector2Array,
+    PackedVector3Array, PackedVector4Array, VariantArray,
+};
+pub use math::{
+    Basis, Color, Plane, Projection, Quaternion, Real, Rect2, Rect2i, Rid, Transform2D,
+    Transform3D, Vector2, Vector2i, Vector3, Vector3i, Vector4, AABB,
+};
 pub use string::GString;
 pub use string_name::StringName;
 pub use variant::{FromGodot, ToGodot, Variant};

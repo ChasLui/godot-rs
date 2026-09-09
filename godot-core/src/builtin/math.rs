@@ -153,6 +153,73 @@ flat_builtin!(
     { position: Vector2i, size: Vector2i }
 );
 
+flat_builtin!(
+    /// A 2D affine transform: two basis vectors and a translation.
+    Transform2D,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_TRANSFORM2D,
+    SIZE_TRANSFORM2D,
+    { x: Vector2, y: Vector2, origin: Vector2 }
+);
+
+flat_builtin!(
+    /// A 3x3 matrix, used for rotation and scale in 3D.
+    Basis,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_BASIS,
+    SIZE_BASIS,
+    { x: Vector3, y: Vector3, z: Vector3 }
+);
+
+flat_builtin!(
+    /// A 3D affine transform: a [`Basis`] plus a translation.
+    Transform3D,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_TRANSFORM3D,
+    SIZE_TRANSFORM3D,
+    { basis: Basis, origin: Vector3 }
+);
+
+flat_builtin!(
+    /// A rotation expressed as a unit quaternion.
+    Quaternion,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_QUATERNION,
+    SIZE_QUATERNION,
+    { x: Real, y: Real, z: Real, w: Real }
+);
+
+flat_builtin!(
+    /// An axis-aligned bounding box.
+    AABB,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_AABB,
+    SIZE_AABB,
+    { position: Vector3, size: Vector3 }
+);
+
+flat_builtin!(
+    /// An infinite plane, as a unit normal and a distance from the origin.
+    Plane,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PLANE,
+    SIZE_PLANE,
+    { normal: Vector3, d: Real }
+);
+
+flat_builtin!(
+    /// A 4x4 matrix, used for projections.
+    Projection,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PROJECTION,
+    SIZE_PROJECTION,
+    { x: Vector4, y: Vector4, z: Vector4, w: Vector4 }
+);
+
+flat_builtin!(
+    /// An opaque handle to a resource owned by one of the engine's servers.
+    ///
+    /// Only meaningful to the server that issued it; it is not a pointer and must not be
+    /// constructed by hand.
+    Rid,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_RID,
+    SIZE_RID,
+    { id: u64 }
+);
+
 // Field offsets, as reported by the engine. Checking these catches a reordering that a
 // size check alone would miss.
 const _: () = {
@@ -161,6 +228,14 @@ const _: () = {
     assert!(std::mem::offset_of!(Vector3, z) == 2 * std::mem::size_of::<Real>());
     assert!(std::mem::offset_of!(Color, a) == 12);
     assert!(std::mem::offset_of!(Rect2, size) == std::mem::size_of::<Vector2>());
+
+    // Nested composites: a wrong element size here would shift everything after it.
+    assert!(std::mem::offset_of!(Transform2D, origin) == 2 * std::mem::size_of::<Vector2>());
+    assert!(std::mem::offset_of!(Basis, z) == 2 * std::mem::size_of::<Vector3>());
+    assert!(std::mem::offset_of!(Transform3D, origin) == std::mem::size_of::<Basis>());
+    assert!(std::mem::offset_of!(AABB, size) == std::mem::size_of::<Vector3>());
+    assert!(std::mem::offset_of!(Plane, d) == std::mem::size_of::<Vector3>());
+    assert!(std::mem::offset_of!(Projection, w) == 3 * std::mem::size_of::<Vector4>());
 };
 
 impl Vector2 {
@@ -259,3 +334,38 @@ impl_vector_ops!(Vector3, Real, { x, y, z });
 impl_vector_ops!(Vector4, Real, { x, y, z, w });
 impl_vector_ops!(Vector2i, i32, { x, y });
 impl_vector_ops!(Vector3i, i32, { x, y, z });
+
+impl Transform2D {
+    /// The transform that changes nothing.
+    pub const IDENTITY: Self = Self::new(
+        Vector2::new(1.0, 0.0),
+        Vector2::new(0.0, 1.0),
+        Vector2::ZERO,
+    );
+}
+
+impl Basis {
+    pub const IDENTITY: Self = Self::new(
+        Vector3::new(1.0, 0.0, 0.0),
+        Vector3::new(0.0, 1.0, 0.0),
+        Vector3::new(0.0, 0.0, 1.0),
+    );
+}
+
+impl Transform3D {
+    pub const IDENTITY: Self = Self::new(Basis::IDENTITY, Vector3::ZERO);
+}
+
+impl Quaternion {
+    /// The rotation that changes nothing.
+    pub const IDENTITY: Self = Self::new(0.0, 0.0, 0.0, 1.0);
+}
+
+impl Rid {
+    /// The invalid handle, which every server rejects.
+    pub const INVALID: Self = Self::new(0);
+
+    pub fn is_valid(self) -> bool {
+        self.id != 0
+    }
+}

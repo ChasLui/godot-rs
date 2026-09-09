@@ -4,6 +4,10 @@
 //! Round-tripping through GDScript is what makes these tests meaningful: it exercises the same
 //! path a real user's code takes.
 
+use godot::builtin::{
+    Color, Dictionary, NodePath, PackedByteArray, PackedStringArray, Transform2D, VariantArray,
+    Vector3,
+};
 use godot::classes;
 use godot::prelude::*;
 use godot::sys;
@@ -296,6 +300,127 @@ impl RustTestNode {
         unsafe { node.free() };
 
         read_back
+    }
+
+    // -- Math builtins ------------------------------------------------------------------
+
+    /// Round-trips a Transform2D through Variant. A wrong field order or element size shows up
+    /// as scrambled numbers rather than a crash, which is why the values are all distinct.
+    #[func]
+    fn echo_transform2d(&mut self, t: Variant) -> Variant {
+        match Transform2D::try_from_variant(&t) {
+            Some(v) => v.to_variant(),
+            None => Variant::nil(),
+        }
+    }
+
+    #[func]
+    fn echo_vector3(&mut self, v: Vector3) -> Vector3 {
+        v
+    }
+
+    #[func]
+    fn echo_color(&mut self, c: Color) -> Color {
+        c
+    }
+
+    /// Exercises the Rust-side math rather than just the marshalling.
+    #[func]
+    fn vector3_cross_length(&mut self, a: Vector3, b: Vector3) -> f64 {
+        a.cross(b).length() as f64
+    }
+
+    // -- Collections --------------------------------------------------------------------
+
+    /// Builds an Array in Rust and hands it back, so GDScript checks both contents and length.
+    #[func]
+    fn make_array(&mut self, count: i64) -> VariantArray {
+        let mut arr = VariantArray::new();
+        for i in 0..count {
+            arr.push(&(i * 10).to_variant());
+        }
+        arr
+    }
+
+    /// Reads an Array built in GDScript.
+    #[func]
+    fn sum_array(&mut self, arr: VariantArray) -> i64 {
+        let mut total = 0;
+        for i in 0..arr.len() {
+            if let Some(v) = i64::try_from_variant(&arr.get(i)) {
+                total += v;
+            }
+        }
+        total
+    }
+
+    #[func]
+    fn make_dictionary(&mut self) -> Dictionary {
+        let mut d = Dictionary::new();
+        d.set(&"answer".to_variant(), &42i64.to_variant());
+        d.set(&"name".to_variant(), &"rust".to_variant());
+        d
+    }
+
+    #[func]
+    fn dictionary_lookup(&mut self, d: Dictionary, key: GString) -> Variant {
+        let key = key.to_variant();
+        if d.has(&key) {
+            d.get_or(&key, &Variant::nil())
+        } else {
+            (-1i64).to_variant()
+        }
+    }
+
+    #[func]
+    fn make_string_array(&mut self) -> PackedStringArray {
+        let mut a = PackedStringArray::new();
+        a.push(&GString::new("alpha"));
+        a.push(&GString::new("beta"));
+        a.push(&GString::new("\u{4e2d}\u{6587}"));
+        a
+    }
+
+    #[func]
+    fn string_array_join(&mut self, a: PackedStringArray) -> GString {
+        let parts: Vec<String> = (0..a.len()).map(|i| a.get(i).to_rust_string()).collect();
+        GString::new(&parts.join("|"))
+    }
+
+    #[func]
+    fn make_byte_array(&mut self) -> PackedByteArray {
+        let mut a = PackedByteArray::new();
+        for b in [1i64, 2, 255] {
+            a.push(b);
+        }
+        a
+    }
+
+    #[func]
+    fn node_path_roundtrip(&mut self, path: GString) -> NodePath {
+        NodePath::from_path(&path.to_rust_string())
+    }
+
+    /// Creates and drops containers in a loop. A destructor mistake usually survives the first
+    /// call and corrupts memory later, so repetition is the point.
+    #[func]
+    fn collection_churn(&mut self, rounds: i64) -> i64 {
+        let mut total = 0;
+        for _ in 0..rounds {
+            let mut arr = VariantArray::new();
+            arr.push(&1i64.to_variant());
+            let cloned = arr.clone();
+            total += cloned.len();
+
+            let mut d = Dictionary::new();
+            d.set(&"k".to_variant(), &arr.to_variant());
+            total += d.len();
+
+            let mut sa = PackedStringArray::new();
+            sa.push(&GString::new("x"));
+            total += sa.len();
+        }
+        total
     }
 
     // -- Object lifetime ----------------------------------------------------------------
