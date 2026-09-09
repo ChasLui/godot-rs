@@ -28,6 +28,12 @@ pub trait GodotClass: Sized + 'static {
     // The hooks below have their own fields in `GDExtensionClassCreationInfo6` and are never
     // requested by name, so they do not go through `virtual_trampoline`.
 
+    /// Called instead of nothing when the engine rebuilds this instance during a hot reload.
+    ///
+    /// The object is the same one; only the Rust state is new. Distinguishing "rebuilt" from
+    /// "state happened to be reset" needs a hook the reload path alone can reach.
+    fn on_recreated(&mut self) {}
+
     /// Godot's `_to_string`. Returning `None` leaves Godot's default representation.
     fn godot_to_string(&mut self) -> Option<crate::builtin::GString> {
         None
@@ -188,6 +194,8 @@ unsafe extern "C" fn recreate_instance<T: GodotClass>(
 ) -> sys::GDExtensionClassInstancePtr {
     let instance = Box::into_raw(Box::new(T::init()));
     (*instance).on_base_ready(object);
+    // Lets a test tell a rebuilt instance from one that merely kept its state.
+    (*instance).on_recreated();
     instance as sys::GDExtensionClassInstancePtr
 }
 

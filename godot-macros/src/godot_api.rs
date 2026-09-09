@@ -17,6 +17,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let mut properties = Vec::new();
     let mut has_init = false;
     let mut has_on_base_ready = false;
+    let mut has_on_recreated = false;
     let mut has_to_string = false;
     let mut has_notification = false;
     let mut has_get = false;
@@ -33,6 +34,9 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         }
         if method.sig.ident == "on_base_ready" {
             has_on_base_ready = true;
+        }
+        if method.sig.ident == "on_recreated" {
+            has_on_recreated = true;
         }
 
         let is_func = take_attr(method, "func");
@@ -204,6 +208,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         quote!()
     };
 
+    let recreated_forward = if has_on_recreated {
+        quote! {
+            fn on_recreated(&mut self) {
+                <Self>::on_recreated(self)
+            }
+        }
+    } else {
+        quote!()
+    };
+
     let base_name = base.to_string();
 
     Ok(quote! {
@@ -251,6 +265,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             }
 
             #base_ready_forward
+            #recreated_forward
             #to_string_forward
             #notification_forward
             #get_forward

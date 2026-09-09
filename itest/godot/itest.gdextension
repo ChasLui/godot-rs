@@ -2,6 +2,7 @@
 
 entry_symbol = "itest_init"
 compatibility_minimum = 4.7
+reloadable = true
 
 [libraries]
 

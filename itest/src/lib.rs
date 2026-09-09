@@ -206,6 +206,12 @@ impl RustTestNode {
         self.base = base;
     }
 
+    /// Only the hot-reload path reaches this, so a sentinel here proves the instance was
+    /// rebuilt rather than merely reset.
+    fn on_recreated(&mut self) {
+        self.counter = 100;
+    }
+
     #[godot_virtual]
     fn ready(&mut self) {
         self.ready_calls += 1;

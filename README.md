@@ -164,6 +164,9 @@ Built and covered by the integration tests:
 - Default arguments: a method with defaults gets a short form taking only the required
   arguments, plus an `_ex` form taking all of them
 - Frame-driven `async` (`godot-async`)
+- Hot reload: swapping the library in the editor rebuilds each instance's Rust state while the
+  engine object survives. Needs `reloadable = true` in the `.gdextension`; the engine only
+  permits it in an editor build.
 - Editor-only classes behind the `editor` feature
 
 **Not implemented.** These are absences, not oversights to be discovered later:
@@ -171,7 +174,6 @@ Built and covered by the integration tests:
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
 - `EditorPlugin` beyond registration; no editor UI integration
-- Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested
 - Windows, Android and iOS are not covered by CI
 - No API compatibility with the `gdnative` crate — Godot 3 code must be rewritten
 

@@ -37,8 +37,17 @@ unsafe extern "C" fn deinitialize_level<E: ExtensionLibrary>(
     _userdata: *mut std::ffi::c_void,
     level: sys::GDExtensionInitializationLevel,
 ) {
-    if let Some(level) = InitLevel::from_sys(level) {
-        E::on_level_deinit(level);
+    let Some(level) = InitLevel::from_sys(level) else {
+        return;
+    };
+
+    E::on_level_deinit(level);
+
+    // Levels are torn down in reverse, so Core is the last callback the extension receives.
+    // Releasing the binding here is what makes a reload work: the engine calls the entry point
+    // again on the same loaded library, and initialization would otherwise see stale state.
+    if level == InitLevel::Core {
+        sys::deinitialize();
     }
 }
 
