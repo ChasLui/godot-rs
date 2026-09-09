@@ -267,6 +267,15 @@ func test_collections() -> void:
 	check(n.node_path_roundtrip("../Sibling/Child") == NodePath("../Sibling/Child"),
 		"NodePath round trip")
 
+	# Enums cross ptrcall as 64-bit integers. PROCESS_MODE_ALWAYS is non-zero, so a wrong width
+	# would show up here rather than passing by accident.
+	check(n.enum_roundtrip() == Node.PROCESS_MODE_ALWAYS,
+		"enum round trip gave %d, expected %d" % [n.enum_roundtrip(), Node.PROCESS_MODE_ALWAYS])
+
+	# Bitfield operations, against the engine's own constants.
+	check(n.bitfield_ops() == PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_EDITOR,
+		"bitfield or/contains gave %d" % n.bitfield_ops())
+
 	# Methods generated from the API dump. Compared field by field against GDScript computing the
 	# same thing, so the check does not depend on how each language formats floats.
 	var parts: PackedStringArray = str(n.generated_builtin_methods()).split(",")

@@ -76,6 +76,14 @@ pub struct UtilityFunction {
 }
 
 #[derive(Deserialize)]
+pub struct ClassEnum {
+    pub name: String,
+    #[serde(default)]
+    pub is_bitfield: bool,
+    pub values: Vec<EnumValue>,
+}
+
+#[derive(Deserialize)]
 pub struct Class {
     pub name: String,
     #[serde(default)]
@@ -91,6 +99,8 @@ pub struct Class {
     pub properties: Vec<Property>,
     #[serde(default)]
     pub signals: Vec<Signal>,
+    #[serde(default)]
+    pub enums: Vec<ClassEnum>,
 }
 
 #[derive(Deserialize)]

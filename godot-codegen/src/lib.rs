@@ -105,6 +105,8 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
     }
 
     let inherits = generate_inherits(&class_map, &selected, &ordered);
+    let enum_owners = referenced_enum_owners(&class_map, &selected);
+    let class_enums = generate_class_enums(&class_map, &enum_owners);
     let singletons = generate_singletons(&api, &selected);
     let global_enums = generate_global_enums(&api);
 
@@ -128,6 +130,7 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
             #class_defs
             #inherits
             #singletons
+            #class_enums
         }
     };
 
@@ -463,8 +466,7 @@ fn generate_vararg_method(
         if !all_classes_available(&ty, selected) {
             return None;
         }
-        if ty == RustTy::Void || ty == RustTy::Enum {
-            // Enums have no Variant conversion of their own yet.
+        if ty == RustTy::Void {
             return None;
         }
         arg_names.push(format_ident!("{}", rust_safe_name(&arg.name)));
@@ -572,39 +574,193 @@ fn generate_singletons(api: &Api, selected: &HashSet<&str>) -> TokenStream {
     out
 }
 
+/// Emits an engine enum as a newtype over `i64`, with its values as associated constants.
+///
+/// Not a Rust `enum`: Godot adds values between releases, and a `match` that has to reject
+/// unknown ones turns every call site into error handling. A newtype keeps the ordinal, so an
+/// unrecognised value passes through instead of being lost.
+fn generate_enum(rust_name: &str, values: &[api::EnumValue], is_bitfield: bool) -> TokenStream {
+    let ident = format_ident!("{}", rust_name);
+
+    let consts: Vec<TokenStream> = values
+        .iter()
+        .map(|v| {
+            // Godot prefixes many constants with the enum name; keep its own spelling.
+            let const_ident = format_ident!("{}", v.name);
+            let val = v.value;
+            quote! {
+                pub const #const_ident: Self = Self(#val);
+            }
+        })
+        .collect();
+
+    let bitops = if is_bitfield {
+        quote! {
+            impl ::std::ops::BitOr for #ident {
+                type Output = Self;
+                fn bitor(self, rhs: Self) -> Self {
+                    Self(self.0 | rhs.0)
+                }
+            }
+
+            impl ::std::ops::BitAnd for #ident {
+                type Output = Self;
+                fn bitand(self, rhs: Self) -> Self {
+                    Self(self.0 & rhs.0)
+                }
+            }
+
+            impl #ident {
+                /// Whether every bit in `flag` is set.
+                pub fn contains(self, flag: Self) -> bool {
+                    self.0 & flag.0 == flag.0
+                }
+            }
+        }
+    } else {
+        quote!()
+    };
+
+    let doc = format!(
+        "Godot's `{}` {}.",
+        rust_name,
+        if is_bitfield { "bitfield" } else { "enum" }
+    );
+
+    quote! {
+        #[doc = #doc]
+        #[repr(transparent)]
+        #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default)]
+        pub struct #ident(pub i64);
+
+        #[allow(non_upper_case_globals)]
+        impl #ident {
+            #(#consts)*
+
+            /// The underlying ordinal, for values this build does not know about.
+            pub fn ord(self) -> i64 {
+                self.0
+            }
+        }
+
+        // Godot passes enums through ptrcall as 64-bit integers, so the newtype is
+        // layout-compatible with what the engine reads and writes.
+        unsafe impl ::godot_core::ptrcall::PtrcallArg for #ident {}
+
+        unsafe impl ::godot_core::ptrcall::PtrcallRet for #ident {
+            unsafe fn from_ptrcall<F>(call: F) -> Self
+            where
+                F: FnOnce(::godot_sys::GDExtensionTypePtr),
+            {
+                Self(<i64 as ::godot_core::ptrcall::PtrcallRet>::from_ptrcall(call))
+            }
+        }
+
+        impl ::godot_core::builtin::ToGodot for #ident {
+            fn to_variant(&self) -> ::godot_core::builtin::Variant {
+                ::godot_core::builtin::ToGodot::to_variant(&self.0)
+            }
+        }
+
+        impl ::godot_core::builtin::FromGodot for #ident {
+            fn try_from_variant(
+                variant: &::godot_core::builtin::Variant,
+            ) -> Option<Self> {
+                <i64 as ::godot_core::builtin::FromGodot>::try_from_variant(variant).map(Self)
+            }
+        }
+
+        #bitops
+    }
+}
+
 fn generate_global_enums(api: &Api) -> TokenStream {
     let mut out = TokenStream::new();
 
     for global_enum in &api.global_enums {
-        // Skip the `Variant.Type`-style nested names; they are not valid Rust module paths and
-        // are not needed by the current surface.
-        if global_enum.name.contains('.') {
-            continue;
-        }
-
-        let mod_ident = format_ident!("{}", global_enum.name);
-        let mut consts = TokenStream::new();
-
-        for value in &global_enum.values {
-            let const_ident = format_ident!("{}", value.name);
-            let val = value.value;
-            consts.extend(quote! {
-                pub const #const_ident: i64 = #val;
-            });
-        }
-
-        let doc = format!("Godot's `{}` enum.", global_enum.name);
-
-        out.extend(quote! {
-            #[doc = #doc]
-            #[allow(non_upper_case_globals)]
-            pub mod #mod_ident {
-                #consts
-            }
-        });
+        let rust_name = enum_rust_name(&global_enum.name);
+        out.extend(generate_enum(
+            &rust_name,
+            &global_enum.values,
+            global_enum.is_bitfield,
+        ));
     }
 
     out
+}
+
+/// Enums declared inside a class, named `<Class><Enum>` so they sit alongside the classes
+/// without a module per class.
+///
+/// Generated for any class an emitted signature mentions, not only for the classes that were
+/// themselves generated: an enum is a plain ordinal and carries none of its class's API, so
+/// there is no reason to drop a method just because its enum happens to be declared on a class
+/// outside the selection.
+fn generate_class_enums(
+    class_map: &HashMap<&str, &Class>,
+    owners: &HashSet<String>,
+) -> TokenStream {
+    let mut out = TokenStream::new();
+
+    let mut ordered: Vec<&String> = owners.iter().collect();
+    ordered.sort();
+
+    for owner in ordered {
+        let Some(class) = class_map.get(owner.as_str()) else {
+            continue;
+        };
+        for class_enum in &class.enums {
+            let rust_name = format!("{}{}", owner, enum_rust_name(&class_enum.name));
+            out.extend(generate_enum(
+                &rust_name,
+                &class_enum.values,
+                class_enum.is_bitfield,
+            ));
+        }
+    }
+
+    out
+}
+
+/// Every class whose enums an emitted signature refers to.
+fn referenced_enum_owners(
+    class_map: &HashMap<&str, &Class>,
+    selected: &HashSet<&str>,
+) -> HashSet<String> {
+    let mut owners = HashSet::new();
+
+    for name in selected {
+        // The class's own enums are always available to it.
+        owners.insert((*name).to_string());
+
+        for method in &class_map[name].methods {
+            if method.is_virtual {
+                continue;
+            }
+            let types = method
+                .return_value
+                .iter()
+                .map(|r| r.type_.as_str())
+                .chain(method.arguments.iter().map(|a| a.type_.as_str()));
+
+            for t in types {
+                for prefix in ["enum::", "bitfield::"] {
+                    if let Some(rest) = t.strip_prefix(prefix) {
+                        if let Some((class, _)) = rest.split_once('.') {
+                            owners.insert(class.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    owners
+}
+
+/// Godot spells some enum names with a dot (`Variant.Type`); Rust needs one identifier.
+fn enum_rust_name(godot_name: &str) -> String {
+    godot_name.replace('.', "")
 }
 
 /// `quote!` emits everything on one line; keep the output readable for debugging.

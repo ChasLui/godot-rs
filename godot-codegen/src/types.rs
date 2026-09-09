@@ -14,8 +14,15 @@ pub enum RustTy {
     /// `Gd<ClassName>` -- always optional on return, since the engine may hand back null.
     Object(String),
     Variant,
-    /// An engine enum; Godot passes these as 64-bit integers through ptrcall.
-    Enum,
+    /// An engine enum or bitfield, as its generated newtype. Passed through ptrcall as a
+    /// 64-bit integer, which is what the newtype wraps.
+    ///
+    /// `owner` is the class that declares it, or `None` for a global enum; the two live in
+    /// different modules and a class-scoped one is only usable if its class was generated.
+    Enum {
+        name: String,
+        owner: Option<String>,
+    },
     /// `TypedArray<T>` -- an `Array` whose element type the engine enforces.
     TypedArray(Box<RustTy>),
 }
@@ -77,7 +84,16 @@ impl RustTy {
                 quote!(&::godot_core::obj::Gd<crate::classes::#ident>)
             }
             RustTy::Variant => quote!(&::godot_core::builtin::Variant),
-            RustTy::Enum => quote!(i64),
+            RustTy::Enum { name, owner } => match owner {
+                Some(class) => {
+                    let ident = format_ident!("{}{}", class, name);
+                    quote!(crate::classes::#ident)
+                }
+                None => {
+                    let ident = format_ident!("{}", name);
+                    quote!(crate::global::#ident)
+                }
+            },
             RustTy::TypedArray(elem) => {
                 // The element appears by value inside the generic, even when it is an object:
                 // `TypedArray<Gd<Node>>`, not `TypedArray<&Gd<Node>>`.
@@ -128,16 +144,28 @@ pub fn map_type(
     meta: Option<&str>,
     is_class: &dyn Fn(&str) -> bool,
 ) -> Option<RustTy> {
-    // Enums and bitfields both arrive as integers.
-    if godot_type.starts_with("enum::") || godot_type.starts_with("bitfield::") {
-        return Some(RustTy::Enum);
+    // `enum::Error`, `enum::Node.ProcessMode`, `bitfield::PropertyUsageFlags`. Class-scoped
+    // names become `<Class><Enum>` to match how the generator emits them.
+    for prefix in ["enum::", "bitfield::"] {
+        if let Some(rest) = godot_type.strip_prefix(prefix) {
+            return Some(match rest.split_once('.') {
+                Some((class, name)) => RustTy::Enum {
+                    name: name.to_string(),
+                    owner: Some(class.to_string()),
+                },
+                None => RustTy::Enum {
+                    name: rest.to_string(),
+                    owner: None,
+                },
+            });
+        }
     }
 
     // A typed array's element type is resolved recursively; a nested typed array is not
     // something the engine produces, so one level is enough.
     if let Some(elem) = godot_type.strip_prefix("typedarray::") {
         let elem_ty = map_type(elem, None, is_class)?;
-        if matches!(elem_ty, RustTy::Void | RustTy::Enum) {
+        if matches!(elem_ty, RustTy::Void | RustTy::Enum { .. }) {
             return None;
         }
         return Some(RustTy::TypedArray(Box::new(elem_ty)));

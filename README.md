@@ -154,6 +154,8 @@ Built and covered by the integration tests:
   methods (`emit_signal`, `call`, `rpc`) through the Variant path
 - Generated methods on the builtin types themselves (`String::find`, `Array::sort`,
   `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
+- Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
+  than a bare integer
 - Frame-driven `async` (`godot-async`)
 - Editor-only classes behind the `editor` feature
 
@@ -164,7 +166,7 @@ Built and covered by the integration tests:
   virtual ones, which an extension overrides rather than calls. The build prints the counts.
 - Callables built from a Rust closure; `Callable` currently references a registered method
   by name.
-- Default arguments, and engine enums as Rust types (they surface as `i64`)
+- Default arguments
 - `EditorPlugin` beyond registration; no editor UI integration
 - Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested
 - Windows, Android and iOS are not covered by CI

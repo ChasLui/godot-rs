@@ -9,6 +9,7 @@ use godot::builtin::{
     Transform2D, TypedArray, VariantArray, Vector2, Vector3,
 };
 use godot::classes;
+use godot::global;
 use godot::prelude::*;
 use godot::sys;
 
@@ -405,6 +406,36 @@ impl RustTestNode {
         NodePath::from_path(&path.to_rust_string())
     }
 
+    /// Round-trips a non-zero enum through the engine.
+    ///
+    /// Enums cross ptrcall as 64-bit integers; a wrong width would still work for zero, so the
+    /// value chosen here is deliberately not the default. Godot's own getter reads it back, so
+    /// a truncated or sign-extended value shows up as a mismatch.
+    #[func]
+    fn enum_roundtrip(&mut self) -> i64 {
+        let Some(node) = Gd::<classes::Node>::new() else {
+            return -1;
+        };
+
+        classes::Node::set_process_mode(&node, classes::NodeProcessMode::PROCESS_MODE_ALWAYS);
+        let read_back = classes::Node::get_process_mode(&node);
+
+        unsafe { node.free() };
+        read_back.ord()
+    }
+
+    /// A bitfield, checking the generated bit operations agree with the engine's values.
+    #[func]
+    fn bitfield_ops(&mut self) -> i64 {
+        let combined = global::PropertyUsageFlags::PROPERTY_USAGE_STORAGE
+            | global::PropertyUsageFlags::PROPERTY_USAGE_EDITOR;
+
+        if !combined.contains(global::PropertyUsageFlags::PROPERTY_USAGE_STORAGE) {
+            return -1;
+        }
+        combined.ord()
+    }
+
     /// Connects a signal to a Rust method from Rust, then emits it.
     ///
     /// This is the whole point of Callable: before it, a Rust class could declare a signal but
@@ -424,8 +455,8 @@ impl RustTestNode {
 
         let err =
             classes::Object::connect(&this, &StringName::new("counter_changed"), &callable, 0);
-        if err != 0 {
-            return -100 - err;
+        if err != global::Error::OK {
+            return -100 - err.ord();
         }
 
         if !classes::Object::is_connected(&this, &StringName::new("counter_changed"), &callable) {
@@ -518,7 +549,12 @@ impl RustTestNode {
 
         for _ in 0..3 {
             if let Some(child) = Gd::<classes::Node>::new() {
-                classes::Node::add_child(&parent, &child, false, 0);
+                classes::Node::add_child(
+                    &parent,
+                    &child,
+                    false,
+                    classes::NodeInternalMode::INTERNAL_MODE_DISABLED,
+                );
             }
         }
 

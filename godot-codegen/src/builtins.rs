@@ -287,12 +287,17 @@ fn generate_method(
         None => RustTy::Void,
         Some(t) => map_type(t, None, is_class)?,
     };
+    if matches!(ret_ty, RustTy::Enum { .. }) {
+        return None;
+    }
 
     let mut arg_names = Vec::new();
     let mut arg_types = Vec::new();
     for arg in &method.arguments {
         let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
-        if ty == RustTy::Void {
+        // Builtin methods live in godot-core, which cannot name the generated enums (they are
+        // emitted into godot-bindings). Those few methods stay unbound.
+        if ty == RustTy::Void || matches!(ty, RustTy::Enum { .. }) {
             return None;
         }
         arg_names.push(format_ident!("{}", rust_safe_name(&arg.name)));
