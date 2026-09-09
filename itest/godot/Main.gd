@@ -60,6 +60,17 @@ func test_virtuals() -> void:
 	check(int(parts[2]) > 0, "_physics_process never fired")
 	check(parts[3] == "true", "accumulated delta was not a plausible frame time")
 
+	# Virtuals that were impossible to override before the dispatch was generalised.
+	var extra: PackedStringArray = str(virtual_node.extra_virtual_counts()).split(",")
+	check(extra.size() == 3, "extra_virtual_counts returned %s" % virtual_node.extra_virtual_counts())
+	if extra.size() == 3:
+		check(int(extra[0]) == 1, "_enter_tree fired %s times, expected 1" % extra[0])
+		check(int(extra[1]) == 0, "_exit_tree fired %s times before removal, expected 0" % extra[1])
+
+	# A virtual with a return value, reached through Godot's own str().
+	check(str(virtual_node) == "RustTestNode!",
+		"_to_string returned %s" % str(virtual_node))
+
 	await test_async()
 
 	virtual_node.free()

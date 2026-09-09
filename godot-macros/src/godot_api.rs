@@ -4,13 +4,6 @@ use syn::parse::Parser as _;
 use syn::spanned::Spanned;
 use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType};
 
-/// The engine hooks a `#[godot_virtual]` method may implement, and the name Godot knows them by.
-const VIRTUALS: &[(&str, &str)] = &[
-    ("ready", "_ready"),
-    ("process", "_process"),
-    ("physics_process", "_physics_process"),
-];
-
 pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let (base, is_runtime) = parse_attr(attr)?;
     let mut impl_block: ItemImpl = syn::parse2(item)?;
@@ -24,6 +17,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let mut properties = Vec::new();
     let mut has_init = false;
     let mut has_on_base_ready = false;
+    let mut has_to_string = false;
 
     // Collect the marked methods and strip the marker attributes, so the original `impl` block
     // still compiles as ordinary Rust.
@@ -59,7 +53,11 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             exported.push(parse_exported(method)?);
         }
         if is_virtual {
-            virtuals.push(parse_virtual(method)?);
+            if method.sig.ident == "to_string" {
+                has_to_string = true;
+            } else {
+                virtuals.push(parse_virtual(method)?);
+            }
         }
         if let Some(setter) = prop_setter {
             properties.push(parse_property(method, setter)?);
@@ -116,8 +114,14 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         }
     });
 
-    let overridden: Vec<&str> = virtuals.iter().map(|v| v.godot_name).collect();
-    let virtual_forwards = virtuals.iter().map(forward_virtual);
+    let virtual_trampolines = virtuals.iter().map(trampoline_for);
+    let virtual_arms = virtuals.iter().map(|v| {
+        let godot_name = &v.godot_name;
+        let tramp = &v.trampoline_ident;
+        quote! {
+            #godot_name => Some(Self::#tramp as ::godot::godot_core::virtuals::VirtualTrampoline),
+        }
+    });
 
     // Forwarded only when the user wrote one; the trait's default is a no-op.
     let base_ready_forward = if has_on_base_ready {
@@ -130,9 +134,24 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         quote!()
     };
 
+    // `_to_string` has its own slot in the creation info; forwarding it through the by-name
+    // dispatch would never fire, since Godot does not ask for it that way.
+    let to_string_forward = if has_to_string {
+        quote! {
+            fn godot_to_string(&mut self) -> Option<::godot::godot_core::builtin::GString> {
+                Some(<Self>::to_string(self))
+            }
+        }
+    } else {
+        quote!()
+    };
+
     let base_name = base.to_string();
 
     Ok(quote! {
+        // Godot's virtual names drive these signatures: `to_string` takes `&mut self` because
+        // the engine hook does, not because it ignores Rust's ToString convention.
+        #[allow(clippy::wrong_self_convention)]
         #impl_block
 
         // Generated shims take their names from the user's methods, so their spelling is not
@@ -174,10 +193,23 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             }
 
             #base_ready_forward
+            #to_string_forward
 
-            const OVERRIDDEN_VIRTUALS: &'static [&'static str] = &[#(#overridden),*];
+            fn virtual_trampoline(
+                name: &str,
+            ) -> Option<::godot::godot_core::virtuals::VirtualTrampoline> {
+                match name {
+                    #(#virtual_arms)*
+                    _ => None,
+                }
+            }
+        }
 
-            #(#virtual_forwards)*
+        // Trampolines unpack the engine's ptrcall arguments into the types each method declares.
+        #[doc(hidden)]
+        #[allow(non_snake_case)]
+        impl #self_ty {
+            #(#virtual_trampolines)*
         }
     })
 }
@@ -356,43 +388,99 @@ fn shim_for(exported: &Exported) -> TokenStream {
 
 struct Virtual {
     ident: syn::Ident,
-    godot_name: &'static str,
-    takes_delta: bool,
+    trampoline_ident: syn::Ident,
+    godot_name: String,
+    arg_types: Vec<syn::Type>,
+    has_return: bool,
 }
 
+/// Godot spells its virtuals with a leading underscore (`_ready`), so a Rust `fn ready`
+/// overrides `_ready`. Any engine virtual can be named this way; a name the engine does not
+/// have is simply never asked for.
 fn parse_virtual(method: &ImplItemFn) -> syn::Result<Virtual> {
     let ident = method.sig.ident.clone();
-    let name = ident.to_string();
 
-    let Some((_, godot_name)) = VIRTUALS.iter().find(|(rust, _)| *rust == name) else {
-        let known: Vec<&str> = VIRTUALS.iter().map(|(rust, _)| *rust).collect();
+    let mut arg_types = Vec::new();
+    let mut saw_receiver = false;
+
+    for arg in &method.sig.inputs {
+        match arg {
+            FnArg::Receiver(recv) => {
+                if recv.reference.is_none() || recv.mutability.is_none() {
+                    return Err(syn::Error::new(
+                        recv.span(),
+                        "#[godot_virtual] methods must take `&mut self`",
+                    ));
+                }
+                saw_receiver = true;
+            }
+            FnArg::Typed(pat) => arg_types.push((*pat.ty).clone()),
+        }
+    }
+
+    if !saw_receiver {
         return Err(syn::Error::new(
-            ident.span(),
-            format!("unknown virtual `{name}`; supported: {}", known.join(", ")),
+            method.sig.span(),
+            "#[godot_virtual] methods must take `&mut self`",
         ));
-    };
+    }
 
     Ok(Virtual {
-        takes_delta: name != "ready",
+        trampoline_ident: format_ident!("__godot_virtual_{}", ident),
+        godot_name: format!("_{ident}"),
         ident,
-        godot_name,
+        arg_types,
+        has_return: !matches!(method.sig.output, ReturnType::Default),
     })
 }
 
-fn forward_virtual(v: &Virtual) -> TokenStream {
+/// Builds the function Godot calls: read each argument out of the ptrcall array, invoke the
+/// user's method, and write back any return value.
+fn trampoline_for(v: &Virtual) -> TokenStream {
+    let tramp_ident = &v.trampoline_ident;
     let ident = &v.ident;
 
-    if v.takes_delta {
-        quote! {
-            fn #ident(&mut self, delta: f64) {
-                <Self>::#ident(self, delta)
+    let reads: Vec<TokenStream> = v
+        .arg_types
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| {
+            let var = format_ident!("arg{}", i);
+            quote! {
+                let #var = <#ty as ::godot::godot_core::virtuals::FromPtrcallArg>::from_arg(
+                    *args.add(#i)
+                );
             }
+        })
+        .collect();
+
+    let arg_idents: Vec<_> = (0..v.arg_types.len())
+        .map(|i| format_ident!("arg{}", i))
+        .collect();
+
+    let call = if v.has_return {
+        quote! {
+            let result = this.#ident(#(#arg_idents),*);
+            ::godot::godot_core::virtuals::IntoPtrcallRet::into_ret(result, ret);
         }
     } else {
         quote! {
-            fn #ident(&mut self) {
-                <Self>::#ident(self)
-            }
+            this.#ident(#(#arg_idents),*);
+            let _ = ret;
+        }
+    };
+
+    quote! {
+        #[doc(hidden)]
+        unsafe fn #tramp_ident(
+            instance: ::godot::sys::GDExtensionClassInstancePtr,
+            args: *const ::godot::sys::GDExtensionConstTypePtr,
+            ret: ::godot::sys::GDExtensionTypePtr,
+        ) {
+            let this = &mut *(instance as *mut Self);
+            let _ = args;
+            #(#reads)*
+            #call
         }
     }
 }

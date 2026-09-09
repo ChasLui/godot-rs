@@ -98,6 +98,9 @@ struct RustTestNode {
     base: sys::GDExtensionObjectPtr,
     signal_hits: i64,
     last_signal_value: i64,
+    enter_tree_calls: i64,
+    exit_tree_calls: i64,
+    input_events: i64,
     ready_calls: i64,
     process_calls: i64,
     physics_calls: i64,
@@ -114,6 +117,9 @@ impl RustTestNode {
             base: std::ptr::null_mut(),
             signal_hits: 0,
             last_signal_value: 0,
+            enter_tree_calls: 0,
+            exit_tree_calls: 0,
+            input_events: 0,
             ready_calls: 0,
             process_calls: 0,
             physics_calls: 0,
@@ -203,6 +209,31 @@ impl RustTestNode {
         self.physics_calls += 1;
     }
 
+    // Beyond the three that used to be hard-coded: any engine virtual can be overridden now.
+    #[godot_virtual]
+    fn enter_tree(&mut self) {
+        self.enter_tree_calls += 1;
+    }
+
+    #[godot_virtual]
+    fn exit_tree(&mut self) {
+        self.exit_tree_calls += 1;
+    }
+
+    /// Takes an object argument, so the trampoline has to unpack a `Gd` rather than a scalar.
+    #[godot_virtual]
+    fn input(&mut self, event: Option<Gd<classes::InputEvent>>) {
+        if event.is_some() {
+            self.input_events += 1;
+        }
+    }
+
+    /// Returns a value, exercising the trampoline's return path.
+    #[godot_virtual]
+    fn to_string(&mut self) -> GString {
+        GString::new("RustTestNode!")
+    }
+
     // -- Variant round trips ------------------------------------------------------------
 
     /// Each `echo_*` proves a full round trip: GDScript value -> Variant -> Rust type ->
@@ -261,6 +292,15 @@ impl RustTestNode {
     #[func]
     fn async_progress(&mut self) -> i64 {
         ASYNC_RESULT.with(|r| r.get())
+    }
+
+    /// Counts for the virtuals that were impossible to override before.
+    #[func]
+    fn extra_virtual_counts(&mut self) -> GString {
+        GString::new(&format!(
+            "{},{},{}",
+            self.enter_tree_calls, self.exit_tree_calls, self.input_events
+        ))
     }
 
     /// Reports how often each virtual hook fired, plus whether the accumulated `delta` looks

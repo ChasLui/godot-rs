@@ -24,21 +24,23 @@ pub trait GodotClass: Sized + 'static {
     /// Declares exported methods. Called once, right after the class itself is registered.
     fn register_methods() {}
 
-    /// Godot names of the virtual methods this class overrides, e.g. `&["_ready", "_process"]`.
+    /// Godot's `_to_string`.
     ///
-    /// Must be listed explicitly: Rust cannot tell whether a defaulted trait method was
-    /// overridden, and Godot needs to know so it can skip classes that do not implement a hook
-    /// -- `_process` in particular would otherwise run every frame for nothing.
-    const OVERRIDDEN_VIRTUALS: &'static [&'static str] = &[];
+    /// Not part of the generic virtual dispatch: a handful of hooks have their own field in
+    /// `GDExtensionClassCreationInfo6` and are never asked for by name -- `_to_string`,
+    /// `_notification`, `_get`/`_set`. Returning `None` leaves Godot's default representation.
+    fn godot_to_string(&mut self) -> Option<crate::builtin::GString> {
+        None
+    }
 
-    /// Called when the node enters the scene tree and all its children are ready.
-    fn ready(&mut self) {}
-
-    /// Called every frame; `delta` is the elapsed time in seconds.
-    fn process(&mut self, _delta: f64) {}
-
-    /// Called every physics tick; `delta` is the fixed step in seconds.
-    fn physics_process(&mut self, _delta: f64) {}
+    /// Resolves a virtual method Godot asks for, by its engine name (`"_ready"`, `"_input"`).
+    ///
+    /// Returning `None` tells the engine the class does not override it, which is what keeps
+    /// `_process` from running every frame on a class that does not implement it. The macro
+    /// generates this from the methods marked `#[godot_virtual]`.
+    fn virtual_trampoline(_name: &str) -> Option<crate::virtuals::VirtualTrampoline> {
+        None
+    }
 
     /// Hands the instance a pointer to the engine object it is attached to.
     ///
@@ -160,6 +162,36 @@ unsafe extern "C" fn recreate_instance<T: GodotClass>(
     instance as sys::GDExtensionClassInstancePtr
 }
 
+/// Godot's dedicated `to_string` hook, which bypasses the by-name virtual dispatch.
+unsafe extern "C" fn to_string<T: GodotClass>(
+    instance: sys::GDExtensionClassInstancePtr,
+    is_valid: *mut sys::GDExtensionBool,
+    out: sys::GDExtensionStringPtr,
+) {
+    if instance.is_null() {
+        if !is_valid.is_null() {
+            *is_valid = false as sys::GDExtensionBool;
+        }
+        return;
+    }
+
+    let this = &mut *(instance as *mut T);
+    match this.godot_to_string() {
+        Some(s) => {
+            if !is_valid.is_null() {
+                *is_valid = true as sys::GDExtensionBool;
+            }
+            // The engine's slot is uninitialized; assigning a copy leaves it owning the value.
+            std::ptr::write(out as *mut crate::builtin::GString, s);
+        }
+        None => {
+            if !is_valid.is_null() {
+                *is_valid = false as sys::GDExtensionBool;
+            }
+        }
+    }
+}
+
 /// Registers `T` with Godot's ClassDB.
 ///
 /// # Safety
@@ -184,13 +216,14 @@ pub unsafe fn register_class<T: GodotClass>() {
     info.is_abstract = false as sys::GDExtensionBool;
     info.is_exposed = true as sys::GDExtensionBool;
     info.is_runtime = T::IS_RUNTIME as sys::GDExtensionBool;
+    info.to_string_func = Some(to_string::<T>);
     info.create_instance_func = Some(create_instance::<T>);
     info.free_instance_func = Some(free_instance::<T>);
     info.recreate_instance_func = Some(recreate_instance::<T>);
     // Resolved once per class by Godot, then cached -- see `virtuals` for why this pair is used
     // instead of `get_virtual_func`.
     info.get_virtual_call_data_func = Some(crate::virtuals::get_virtual_call_data::<T>);
-    info.call_virtual_with_data_func = Some(crate::virtuals::call_virtual_with_data::<T>);
+    info.call_virtual_with_data_func = Some(crate::virtuals::call_virtual_with_data);
     info.class_userdata = userdata as *mut std::ffi::c_void;
 
     sys::interface_fn!(classdb_register_extension_class6)(
