@@ -62,6 +62,9 @@ jobs:
           - os: macos-latest
             godot_platform: macos.universal
             lib: libitest.dylib
+          - os: windows-latest
+            godot_platform: win64.exe
+            lib: itest.dll
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -69,6 +72,8 @@ jobs:
 
       - name: Download Godot ${{ env.GODOT_VERSION }}
         run: |
+          # The asset names do not follow one rule: macOS ships an .app bundle, Linux a bare
+          # executable, Windows an .exe whose platform tag already contains ".exe".
           url="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_${{ matrix.godot_platform }}.zip"
           curl -L -o godot.zip "$url"
           unzip -q godot.zip -d godot-bin

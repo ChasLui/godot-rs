@@ -49,9 +49,11 @@ function findGodot() {
 # The dynamic library extension differs per platform; the .gdextension lists all of them.
 function libName() {
     case "$(uname -s)" in
-        Darwin) echo "libitest.dylib" ;;
-        Linux)  echo "libitest.so" ;;
-        *)      echo "itest.dll" ;;
+        Darwin)            echo "libitest.dylib" ;;
+        Linux)             echo "libitest.so" ;;
+        # Git Bash / MSYS on Windows; Rust emits a cdylib without the `lib` prefix there.
+        MINGW*|MSYS*|CYGWIN*) echo "itest.dll" ;;
+        *)                 echo "itest.dll" ;;
     esac
 }
 
