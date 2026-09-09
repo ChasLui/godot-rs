@@ -25,6 +25,10 @@ pub enum RustTy {
     },
     /// `TypedArray<T>` -- an `Array` whose element type the engine enforces.
     TypedArray(Box<RustTy>),
+    /// A raw pointer into something the engine does not describe -- an OpenXR handle, an entry
+    /// function. The binding passes it through; validating it is the caller's problem, which is
+    /// why any method taking one is generated `unsafe`.
+    RawPointer,
 }
 
 /// Builtins whose Rust struct is `Copy`: flat data the engine passes by value.
@@ -63,6 +67,11 @@ impl RustTy {
         }
     }
 
+    /// Whether a method mentioning this type has to be `unsafe`.
+    pub fn requires_unsafe(&self) -> bool {
+        matches!(self, RustTy::RawPointer)
+    }
+
     /// The Rust type as it appears in an argument position.
     pub fn arg_tokens(&self) -> TokenStream {
         match self {
@@ -84,6 +93,7 @@ impl RustTy {
                 quote!(&::godot_core::obj::Gd<crate::classes::#ident>)
             }
             RustTy::Variant => quote!(&::godot_core::builtin::Variant),
+            RustTy::RawPointer => quote!(*const ::std::ffi::c_void),
             RustTy::Enum { name, owner } => match owner {
                 Some(class) => {
                     let ident = format_ident!("{}{}", class, name);
@@ -190,9 +200,10 @@ pub fn map_type_with(
         return Some(RustTy::TypedArray(Box::new(elem_ty)));
     }
 
-    // Pointer-typed arguments (native structures) are out of scope.
+    // Pointers to types the API dump does not describe. Passed through as `*const c_void`;
+    // the few methods involved are generated `unsafe`.
     if godot_type.contains('*') {
-        return None;
+        return Some(RustTy::RawPointer);
     }
 
     match godot_type {

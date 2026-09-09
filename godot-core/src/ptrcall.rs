@@ -77,6 +77,21 @@ unsafe impl PtrcallRet for () {
     }
 }
 
+/// A raw pointer argument: ptrcall passes the address *of* the pointer, the same as it does for
+/// an object handle, so the default `arg_ptr` is already right.
+unsafe impl PtrcallArg for *const std::ffi::c_void {}
+
+unsafe impl PtrcallRet for *const std::ffi::c_void {
+    unsafe fn from_ptrcall<F>(call: F) -> Self
+    where
+        F: FnOnce(sys::GDExtensionTypePtr),
+    {
+        let mut slot = MaybeUninit::<Self>::zeroed();
+        call(slot.as_mut_ptr() as sys::GDExtensionTypePtr);
+        slot.assume_init()
+    }
+}
+
 // `Gd<T>` is transparent over the object pointer, which is exactly what ptrcall passes and
 // returns. A null pointer means "no object", hence the `Option`.
 unsafe impl<T: GodotObject> PtrcallArg for Gd<T> {}

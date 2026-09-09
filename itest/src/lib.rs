@@ -553,6 +553,48 @@ impl RustTestNode {
         (short as i64) * 10 + full as i64
     }
 
+    /// Calls the two raw-pointer methods that can be reached without external hardware.
+    ///
+    /// These three methods are generated `unsafe` because the API description says nothing
+    /// about what the pointer addresses. What is checked here is that the generated signature
+    /// and marshalling are right -- the call goes through, returns the value the engine
+    /// documents for the input, and does not corrupt anything.
+    ///
+    /// It is *not* a check that the pointed-to bytes reach their consumer:
+    /// `transform_from_pose` returns a default Transform3D before dereferencing when no OpenXR
+    /// runtime is present, which is always the case in CI. Verifying that would need an XR
+    /// device.
+    ///
+    /// Returns `"status,origin_is_default"`.
+    #[func]
+    fn raw_pointer_method(&mut self) -> GString {
+        let manager = classes::GDExtensionManager::singleton();
+
+        // SAFETY: null is a defined input -- the engine reports failure rather than
+        // dereferencing it.
+        let status = unsafe {
+            manager.load_extension_from_function(
+                &GString::new("res://does_not_exist.gdextension"),
+                std::ptr::null(),
+            )
+        };
+
+        let origin_is_default = match Gd::<classes::OpenXRAPIExtension>::new() {
+            Some(api) => {
+                // XrPosef: orientation (x, y, z, w) then position (x, y, z).
+                let pose: [f32; 7] = [0.0, 0.0, 0.0, 1.0, 1.5, -2.5, 3.0];
+
+                // SAFETY: `pose` matches the layout the method expects and outlives the call.
+                let t =
+                    unsafe { api.transform_from_pose(pose.as_ptr() as *const std::ffi::c_void) };
+                t.origin == godot::builtin::Vector3::ZERO
+            }
+            None => true,
+        };
+
+        GString::new(&format!("{},{origin_is_default}", status.ord()))
+    }
+
     /// Calls methods reached through several Deref steps, to check the chain resolves to the
     /// right object rather than merely compiling.
     ///

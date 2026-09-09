@@ -362,6 +362,14 @@ func test_collections() -> void:
 		"default argument substitution: got %d, expected 1 (short=0, full=1)"
 			% n.default_arguments_match())
 
+	# The raw-pointer methods: the call path works and returns what the engine documents.
+	# load_extension_from_function rejects a null entry function; transform_from_pose bails out
+	# with a default transform when no OpenXR runtime exists, which is the case here -- so this
+	# covers the signature and marshalling, not the fate of the pointed-to bytes.
+	check(n.raw_pointer_method() == "%d,true" % GDExtensionManager.LOAD_STATUS_FAILED,
+		"raw-pointer methods gave %s, expected \"%d,true\""
+			% [n.raw_pointer_method(), GDExtensionManager.LOAD_STATUS_FAILED])
+
 	# Methods inherited across several Deref steps must land on the right object: the name and
 	# class come from three and four levels up the hierarchy, the flip flag from Sprite2D itself.
 	check(n.deref_chain() == "Deep,Sprite2D,true",

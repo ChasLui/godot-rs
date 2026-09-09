@@ -270,7 +270,20 @@ fn generate_method(
         });
     };
 
-    let doc = format!("Calls `{}::{}`.", class.name, method.name);
+    let needs_unsafe = ret_ty.requires_unsafe() || arg_types.iter().any(RustTy::requires_unsafe);
+    let unsafe_kw = if needs_unsafe {
+        quote!(unsafe)
+    } else {
+        quote!()
+    };
+
+    let mut doc = format!("Calls `{}::{}`.", class.name, method.name);
+    if needs_unsafe {
+        doc.push_str(
+            "\n\n# Safety\nTakes a pointer to a type the engine's API description does not \
+             cover, so its validity cannot be checked here; the caller must guarantee it.",
+        );
+    }
 
     // Static methods have no instance; Godot expects a null object pointer. Instance methods
     // take `&self` on the marker type, which `Gd` derefs to, and recover the object pointer
@@ -318,7 +331,7 @@ fn generate_method(
         // Nothing to default; one plain method.
         return Some(quote! {
             #[doc = #doc]
-            pub fn #fn_ident(#self_param #(#params),*) #ret_clause {
+            pub #unsafe_kw fn #fn_ident(#self_param #(#params),*) #ret_clause {
                 #body
             }
         });
@@ -357,15 +370,23 @@ fn generate_method(
     );
     let ex_doc = format!("{} Every argument explicit.", doc);
 
+    // A short form forwarding into an unsafe full form has to be unsafe as well, and its call
+    // needs an unsafe block.
+    let forward_call = if needs_unsafe {
+        quote!(unsafe { Self::#ex_ident(#self_forward #(#forwarded),*) })
+    } else {
+        quote!(Self::#ex_ident(#self_forward #(#forwarded),*))
+    };
+
     Some(quote! {
         #[doc = #ex_doc]
-        pub fn #ex_ident(#self_param #(#params),*) #ret_clause {
+        pub #unsafe_kw fn #ex_ident(#self_param #(#params),*) #ret_clause {
             #body
         }
 
         #[doc = #short_doc]
-        pub fn #fn_ident(#self_param #(#required_params),*) #ret_clause {
-            Self::#ex_ident(#self_forward #(#forwarded),*)
+        pub #unsafe_kw fn #fn_ident(#self_param #(#required_params),*) #ret_clause {
+            #forward_call
         }
     })
 }

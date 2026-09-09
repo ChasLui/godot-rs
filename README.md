@@ -163,9 +163,10 @@ Built and covered by the integration tests:
     signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
   methods read as `node.add_child(&child)` and inherited ones need no base-class name
-- Generated bindings for every non-editor engine class -- 954 classes, ~14,800 methods --
+- Generated bindings for every non-editor engine class -- 954 classes, ~14,900 methods --
   called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
-  Variant path
+  Variant path. The three methods taking a pointer into something the API description does not
+  cover are generated `unsafe`.
 - Generated methods on the builtin types themselves (`String::find`, `Array::sort`,
   `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
 - Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
