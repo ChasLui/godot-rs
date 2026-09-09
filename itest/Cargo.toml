@@ -11,5 +11,11 @@ publish = false
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = []
+# Builds the editor half of the suite: a Rust EditorPlugin. Off by default so the ordinary
+# game-mode run stays on the same configuration a shipped extension uses.
+editor = ["godot/editor"]
+
 [dependencies]
 godot = { path = "../godot", version = "0.1.0" }

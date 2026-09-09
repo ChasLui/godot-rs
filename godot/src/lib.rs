@@ -92,7 +92,7 @@
 //! generated, every non-virtual method is callable, and any virtual can be overridden. Editor
 //! classes are behind the `editor` feature.
 
-pub use godot_core::{builtin, init, method, obj, ptrcall, registry, signal, sys};
+pub use godot_core::{builtin, editor, init, method, obj, ptrcall, registry, signal, sys};
 
 /// Generated bindings to Godot's own classes.
 pub use godot_bindings::{classes, global, GODOT_PRECISION, GODOT_VERSION};

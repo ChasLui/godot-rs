@@ -1,0 +1,17 @@
+[package]
+name = "editor-plugin"
+description = "An editor dock written in Rust, added without a plugin.cfg."
+version = "0.1.0"
+license = "MIT"
+edition = "2021"
+rust-version = "1.70"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# The editor classes are behind a feature: an extension that references them fails to load in an
+# exported project, where those classes do not exist. A plugin is only ever loaded by the editor,
+# so enabling it here is right -- for a game extension it would not be.
+godot = { path = "../../godot", version = "0.1.0", features = ["editor"] }

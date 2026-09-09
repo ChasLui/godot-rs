@@ -12,6 +12,7 @@ func check(condition: bool, message: String) -> void:
 
 func _enter_tree() -> void:
 	test_editor_only_class()
+	test_rust_editor_plugin()
 	test_hot_reload()
 
 	if failures.is_empty():
@@ -30,6 +31,27 @@ func test_editor_only_class() -> void:
 		check(n != null and n.marker() == 1, "editor-only class did not work")
 		if n != null:
 			n.free()
+
+func test_rust_editor_plugin() -> void:
+	# A Rust EditorPlugin is added through editor_add_plugin, not through a plugin.cfg, so
+	# there is no addon entry to look for -- the class simply exists and the editor holds an
+	# instance of it.
+	if not ClassDB.class_exists("RustTestPlugin"):
+		failures.append("the Rust EditorPlugin class was not registered")
+		return
+
+	# The editor owns the plugin instance and never exposes it, so the counters kept on the
+	# Rust side are the only way to see whether the engine actually called in.
+	var probe: Object = ClassDB.instantiate("RustPluginProbe")
+	check(probe.plugin_enter_tree_calls() > 0,
+		"_enter_tree never fired: the class registered but was not added to the editor")
+	check(probe.plugin_name_calls() > 0,
+		"_get_plugin_name was never asked for")
+	probe.free()
+
+	# The plugin descends from EditorPlugin, and that is what makes it one.
+	check(ClassDB.is_parent_class("RustTestPlugin", "EditorPlugin"),
+		"RustTestPlugin does not descend from EditorPlugin")
 
 func test_hot_reload() -> void:
 	# Reloading is only enabled in an editor build, and only for an extension whose

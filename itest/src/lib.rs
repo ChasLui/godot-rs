@@ -51,6 +51,15 @@ impl ExtensionLibrary for ItestLibrary {
             // run too. Registering something editor-only therefore needs an explicit check.
             InitLevel::Editor if is_editor() => unsafe {
                 register_class::<RustEditorOnlyNode>();
+
+                // The plugin is added *after* its class is in ClassDB -- the engine looks the
+                // name up and instantiates it right here.
+                #[cfg(feature = "editor")]
+                {
+                    register_class::<RustTestPlugin>();
+                    register_class::<RustPluginProbe>();
+                    godot::editor::add_editor_plugin::<RustTestPlugin>();
+                }
             },
             _ => {}
         }
@@ -63,6 +72,15 @@ impl ExtensionLibrary for ItestLibrary {
                 unregister_class::<RustRuntimeOnlyNode>();
             },
             InitLevel::Editor if is_editor() => unsafe {
+                // Strictly the reverse of init: the editor holds a live instance, so removing
+                // the plugin has to come before the class it is an instance of goes away.
+                #[cfg(feature = "editor")]
+                {
+                    godot::editor::remove_editor_plugin::<RustTestPlugin>();
+                    unregister_class::<RustPluginProbe>();
+                    unregister_class::<RustTestPlugin>();
+                }
+
                 unregister_class::<RustEditorOnlyNode>();
             },
             _ => {}
@@ -74,6 +92,75 @@ impl ExtensionLibrary for ItestLibrary {
 fn is_editor() -> bool {
     let engine = classes::Engine::singleton();
     engine.is_editor_hint()
+}
+
+/// Counts the engine's calls into the plugin.
+///
+/// The editor owns the plugin instance and nothing hands it to GDScript, so a static counter is
+/// the only way for the assertions to see whether the engine really called in.
+#[cfg(feature = "editor")]
+static PLUGIN_ENTER_TREE_CALLS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+#[cfg(feature = "editor")]
+static PLUGIN_NAME_CALLS: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+/// A real editor plugin, written in Rust and added without a `plugin.cfg`.
+#[cfg(feature = "editor")]
+struct RustTestPlugin;
+
+#[cfg(feature = "editor")]
+#[godot_api(base = EditorPlugin)]
+impl RustTestPlugin {
+    fn init() -> Self {
+        Self
+    }
+
+    #[godot_virtual]
+    fn enter_tree(&mut self) {
+        PLUGIN_ENTER_TREE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Returns an owned builtin, which is the path `IntoPtrcallRet` has to assign rather than
+    /// overwrite. Unlike the probe in `RustTestNode`, this one is driven by the real engine.
+    #[godot_virtual]
+    fn get_plugin_name(&mut self) -> GString {
+        PLUGIN_NAME_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        GString::new("RustTestPlugin")
+    }
+
+    #[godot_virtual]
+    fn has_main_screen(&mut self) -> bool {
+        false
+    }
+}
+
+/// Reads the plugin counters back out for the editor-side assertions.
+///
+/// A separate class rather than two more methods on `RustEditorOnlyNode`: `#[godot_api]` builds
+/// its method table from the impl block as written, so a `#[cfg]` on an individual method
+/// removes the function while leaving the registration behind it.
+#[cfg(feature = "editor")]
+struct RustPluginProbe;
+
+#[cfg(feature = "editor")]
+#[godot_api(base = Node)]
+impl RustPluginProbe {
+    fn init() -> Self {
+        Self
+    }
+
+    /// How many times the engine entered the Rust plugin into the tree. Zero means the class
+    /// was registered but never actually added to the editor.
+    #[func]
+    fn plugin_enter_tree_calls(&mut self) -> i64 {
+        PLUGIN_ENTER_TREE_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// How many times the engine asked the plugin for its name.
+    #[func]
+    fn plugin_name_calls(&mut self) -> i64 {
+        PLUGIN_NAME_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+    }
 }
 
 /// Registered only when running inside the editor, to prove the gate actually gates.

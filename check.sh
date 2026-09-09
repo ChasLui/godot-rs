@@ -172,7 +172,10 @@ for arg in "${args[@]}"; do
         findGodot
         lib=$(libName)
         target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
-        cmds+=("cargo build -p itest")
+        # The editor half needs the editor classes. This shares a library path with `itest`, so
+        # running both in one go rebuilds once -- the cost of keeping the game-mode run on the
+        # same configuration a shipped extension uses.
+        cmds+=("cargo build -p itest --features editor")
         cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
         cmds+=("ensureImported itest/godot")
         cmds+=("runEditorTest")

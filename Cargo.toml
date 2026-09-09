@@ -12,4 +12,5 @@ members = [
     "examples/hello-world",
     "examples/counter",
     "examples/bouncing-ball",
+    "examples/editor-plugin",
 ]

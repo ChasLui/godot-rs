@@ -8,6 +8,7 @@
 extern crate self as godot_core;
 
 pub mod builtin;
+pub mod editor;
 pub mod init;
 pub mod logging;
 

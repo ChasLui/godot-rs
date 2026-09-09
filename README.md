@@ -132,6 +132,7 @@ windows.debug.x86_64 = "res://lib/my_library.dll"
 | [`examples/hello-world`](examples/hello-world) | The smallest working extension |
 | [`examples/counter`](examples/counter) | Properties, signals, and frame-driven async |
 | [`examples/bouncing-ball`](examples/bouncing-ball) | A game loop: physics, custom drawing, input and signals together |
+| [`examples/editor-plugin`](examples/editor-plugin) | An `EditorPlugin` in Rust, added without a `plugin.cfg` |
 
 Build and run one:
 
@@ -143,6 +144,47 @@ godot --path examples/counter/godot
 
 The first run has to scan the project before Godot picks up the `.gdextension`; opening it in the
 editor once does that. `check.sh` handles this automatically for the test project.
+
+## The `editor` feature
+
+Editor classes -- `EditorPlugin`, `EditorInterface`, and 80 others -- are generated only when the
+`editor` feature is on:
+
+```toml
+godot = { version = "0.1", features = ["editor"] }
+```
+
+**Leave it off for anything shipped in a game.** An extension that references an editor class
+fails to load in an exported project, where those classes do not exist. It belongs on an
+extension that only ever runs inside the editor, such as a plugin.
+
+Registering one takes no `plugin.cfg`:
+
+```rust
+impl ExtensionLibrary for MyPlugin {
+    fn on_level_init(level: InitLevel) {
+        // The Editor level is a startup phase, not a mode -- a running game goes through it
+        // too, so the hint has to be checked as well.
+        if level == InitLevel::Editor && Engine::singleton().is_editor_hint() {
+            unsafe {
+                register_class::<MyEditorPlugin>();   // must be in ClassDB first
+                add_editor_plugin::<MyEditorPlugin>();
+            }
+        }
+    }
+
+    fn on_level_deinit(level: InitLevel) {
+        if level == InitLevel::Editor && Engine::singleton().is_editor_hint() {
+            unsafe {
+                remove_editor_plugin::<MyEditorPlugin>();   // the editor holds an instance
+                unregister_class::<MyEditorPlugin>();
+            }
+        }
+    }
+}
+```
+
+See [`examples/editor-plugin`](examples/editor-plugin).
 
 ## Scope
 
@@ -180,13 +222,21 @@ Built and covered by the integration tests:
 - Hot reload: swapping the library in the editor rebuilds each instance's Rust state while the
   engine object survives. Needs `reloadable = true` in the `.gdextension`; the engine only
   permits it in an editor build.
-- Editor-only classes behind the `editor` feature
+- Editor plugins: a Rust class descending from `EditorPlugin` is added with
+  `editor::add_editor_plugin`, which takes a class name and nothing else -- no `plugin.cfg`, no
+  script file, no `addons/` directory. Editor classes come with the `editor` feature.
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
-- `EditorPlugin` beyond registration; no editor UI integration
+- Adding controls to the editor's interface. `add_control_to_dock` and `add_control_to_container`
+  crash the engine and the cause is not yet found -- ruled out so far: the plugin's own handle
+  (a no-argument call works), object arguments (`remove_control_from_docks` works), enum argument
+  width (`int64_t` on both sides), call timing (`_enter_tree` and `_ready` alike) and cleanup
+  order (it crashes with no cleanup at all). Everything else about editor plugins works.
+- Object parameters that are optional in Godot are generated as required, so a method like
+  `add_control_to_dock` has no way to pass the null its `shortcut` argument defaults to
 - Windows, Android and iOS are not covered by CI
 - No API compatibility with the `gdnative` crate — Godot 3 code must be rewritten
 

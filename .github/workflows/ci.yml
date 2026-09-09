@@ -122,6 +122,26 @@ jobs:
       - name: Run editor-mode tests
         run: ./check.sh etest
 
+  editor-feature:
+    name: editor feature
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # The `editor` feature is per-package, so `--workspace --features editor` does not work:
+      # cargo would look for the feature on every member. The editor half is not otherwise
+      # built by CI, and code nothing builds rots.
+      - run: cargo check -p godot -p itest --features editor
+      - run: cargo build -p editor-plugin
+      - run: |
+          cargo clippy -p godot -p itest --features editor -- \
+            -D clippy::style -D clippy::complexity -D clippy::perf \
+            -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings
+
   examples:
     name: examples
     runs-on: ubuntu-latest
