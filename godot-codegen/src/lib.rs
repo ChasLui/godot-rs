@@ -14,7 +14,7 @@ use api::{Api, Class};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use std::collections::{HashMap, HashSet};
-use types::{map_type, rust_safe_name, RustTy};
+use types::{default_value_expr, map_type, rust_safe_name, RustTy};
 
 /// Classes the closure starts from: enough to write ordinary game logic.
 ///
@@ -331,6 +331,7 @@ fn generate_method(
     // Arguments.
     let mut arg_names = Vec::new();
     let mut arg_types = Vec::new();
+    let mut arg_defaults = Vec::new();
     for arg in &method.arguments {
         let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
         if !all_classes_available(&ty, selected) {
@@ -339,6 +340,11 @@ fn generate_method(
         if ty == RustTy::Void {
             return None;
         }
+        arg_defaults.push(
+            arg.default_value
+                .as_deref()
+                .and_then(|raw| default_value_expr(&ty, raw)),
+        );
         arg_names.push(format_ident!("{}", rust_safe_name(&arg.name)));
         arg_types.push(ty);
     }
@@ -412,10 +418,66 @@ fn generate_method(
         quote!(-> #ret_tokens)
     };
 
+    // Godot's defaults are always a trailing run. Find where it starts, but only across
+    // arguments whose default could actually be expressed -- one unparseable default in the
+    // middle stops the run rather than silently dropping later ones.
+    let mut required = arg_names.len();
+    while required > 0 && arg_defaults[required - 1].is_some() {
+        required -= 1;
+    }
+
+    if required == arg_names.len() {
+        // Nothing to default; one plain method.
+        return Some(quote! {
+            #[doc = #doc]
+            pub fn #fn_ident(#self_param #(#params),*) #ret_clause {
+                #body
+            }
+        });
+    }
+
+    // The full form keeps every argument, under an `_ex` name; the short form takes only the
+    // required ones and is what most call sites want, so it keeps the plain name.
+    let ex_ident = format_ident!("{}_ex", fn_ident);
+    let required_params = &params[..required];
+    let forwarded: Vec<TokenStream> = arg_names
+        .iter()
+        .take(required)
+        .map(|name| quote!(#name))
+        .chain(
+            arg_defaults[required..]
+                .iter()
+                .map(|d| d.clone().expect("trailing defaults were checked above")),
+        )
+        .collect();
+
+    let self_forward = if method.is_static {
+        quote!()
+    } else {
+        quote!(this,)
+    };
+
+    let omitted: Vec<String> = method.arguments[required..]
+        .iter()
+        .map(|a| format!("`{}`", a.name))
+        .collect();
+    let short_doc = format!(
+        "{} Leaves {} at Godot's default; use [`Self::{}`] to pass them.",
+        doc,
+        omitted.join(", "),
+        ex_ident
+    );
+    let ex_doc = format!("{} Every argument explicit.", doc);
+
     Some(quote! {
-        #[doc = #doc]
-        pub fn #fn_ident(#self_param #(#params),*) #ret_clause {
+        #[doc = #ex_doc]
+        pub fn #ex_ident(#self_param #(#params),*) #ret_clause {
             #body
+        }
+
+        #[doc = #short_doc]
+        pub fn #fn_ident(#self_param #(#required_params),*) #ret_clause {
+            Self::#ex_ident(#self_forward #(#forwarded),*)
         }
     })
 }

@@ -406,6 +406,35 @@ impl RustTestNode {
         NodePath::from_path(&path.to_rust_string())
     }
 
+    /// Checks that a short form substitutes the default Godot documents, not some other value.
+    ///
+    /// The child is added as *internal*, which `get_child_count` only counts when explicitly
+    /// asked. So the short form (`include_internal` defaulting to false) must see 0 while the
+    /// full form passing true sees 1 -- a wrong default flips one of them.
+    /// Returns the two counts encoded as `short * 10 + full`.
+    #[func]
+    fn default_arguments_match(&mut self) -> i64 {
+        let Some(parent) = Gd::<classes::Node>::new() else {
+            return -1;
+        };
+        let Some(child) = Gd::<classes::Node>::new() else {
+            return -1;
+        };
+
+        classes::Node::add_child_ex(
+            &parent,
+            &child,
+            false,
+            classes::NodeInternalMode::INTERNAL_MODE_FRONT,
+        );
+
+        let short = classes::Node::get_child_count(&parent);
+        let full = classes::Node::get_child_count_ex(&parent, true);
+
+        unsafe { parent.free() };
+        (short as i64) * 10 + full as i64
+    }
+
     /// Round-trips a non-zero enum through the engine.
     ///
     /// Enums cross ptrcall as 64-bit integers; a wrong width would still work for zero, so the
@@ -453,8 +482,7 @@ impl RustTestNode {
             return -2;
         }
 
-        let err =
-            classes::Object::connect(&this, &StringName::new("counter_changed"), &callable, 0);
+        let err = classes::Object::connect(&this, &StringName::new("counter_changed"), &callable);
         if err != global::Error::OK {
             return -100 - err.ord();
         }
@@ -549,16 +577,11 @@ impl RustTestNode {
 
         for _ in 0..3 {
             if let Some(child) = Gd::<classes::Node>::new() {
-                classes::Node::add_child(
-                    &parent,
-                    &child,
-                    false,
-                    classes::NodeInternalMode::INTERNAL_MODE_DISABLED,
-                );
+                classes::Node::add_child(&parent, &child);
             }
         }
 
-        let children = classes::Node::get_children(&parent, false);
+        let children = classes::Node::get_children(&parent);
         let count = children.len();
 
         // Reading an element back proves the typed accessor works, not just the length.

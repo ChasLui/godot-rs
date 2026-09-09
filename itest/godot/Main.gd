@@ -267,6 +267,14 @@ func test_collections() -> void:
 	check(n.node_path_roundtrip("../Sibling/Child") == NodePath("../Sibling/Child"),
 		"NodePath round trip")
 
+	# A method's short form must substitute the same default the engine documents; calling both
+	# forms has to produce identical results.
+	# One internal child: the short form (include_internal defaults to false) must not count it,
+	# the full form passing true must. Encoded as short * 10 + full, so 1 means 0 and 1.
+	check(n.default_arguments_match() == 1,
+		"default argument substitution: got %d, expected 1 (short=0, full=1)"
+			% n.default_arguments_match())
+
 	# Enums cross ptrcall as 64-bit integers. PROCESS_MODE_ALWAYS is non-zero, so a wrong width
 	# would show up here rather than passing by accident.
 	check(n.enum_roundtrip() == Node.PROCESS_MODE_ALWAYS,

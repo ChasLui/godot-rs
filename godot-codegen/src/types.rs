@@ -264,3 +264,141 @@ pub fn rust_safe_name(name: &str) -> String {
         _ => name.to_string(),
     }
 }
+
+/// Turns Godot's textual default value into a Rust expression of type `ty`.
+///
+/// Returns `None` for forms not worth special-casing (object nulls, container literals); a
+/// method with one of those simply keeps its full-argument signature and gains no short form,
+/// rather than being dropped.
+pub fn default_value_expr(ty: &RustTy, raw: &str) -> Option<TokenStream> {
+    let raw = raw.trim();
+
+    match ty {
+        RustTy::Primitive(name) => {
+            match *name {
+                "bool" => match raw {
+                    "true" => Some(quote!(true)),
+                    "false" => Some(quote!(false)),
+                    _ => None,
+                },
+                // Emitted as a literal of the target type rather than a cast: Godot writes
+                // some float defaults without a decimal point ("-1"), so the text cannot be
+                // passed through, but `0f64 as f64` would be a redundant cast.
+                "f32" => {
+                    let value = raw.parse::<f64>().ok()? as f32;
+                    Some(quote!(#value))
+                }
+                "f64" => {
+                    let value: f64 = raw.parse().ok()?;
+                    Some(quote!(#value))
+                }
+                // Same reasoning as the floats: emit a literal of the exact width so no cast
+                // is needed. `quote!` suffixes integers by their Rust type, hence the match.
+                _ => {
+                    let value: i64 = raw.parse().ok()?;
+                    Some(match *name {
+                        "i8" => {
+                            let v = value as i8;
+                            quote!(#v)
+                        }
+                        "i16" => {
+                            let v = value as i16;
+                            quote!(#v)
+                        }
+                        "i32" => {
+                            let v = value as i32;
+                            quote!(#v)
+                        }
+                        "i64" => quote!(#value),
+                        "u8" => {
+                            let v = value as u8;
+                            quote!(#v)
+                        }
+                        "u16" => {
+                            let v = value as u16;
+                            quote!(#v)
+                        }
+                        "u32" => {
+                            let v = value as u32;
+                            quote!(#v)
+                        }
+                        "u64" => {
+                            let v = value as u64;
+                            quote!(#v)
+                        }
+                        _ => return None,
+                    })
+                }
+            }
+        }
+
+        RustTy::Enum { .. } => {
+            let value: i64 = raw.parse().ok()?;
+            let ty_tokens = ty.owned_tokens();
+            Some(quote!(#ty_tokens(#value)))
+        }
+
+        RustTy::Builtin(name) => match *name {
+            // `&""` is how the dump spells an empty StringName.
+            "StringName" => {
+                let text = strip_quotes(raw.trim_start_matches('&'))?;
+                Some(quote!(&::godot_core::builtin::StringName::new(#text)))
+            }
+            "GString" => {
+                let text = strip_quotes(raw)?;
+                Some(quote!(&::godot_core::builtin::GString::new(#text)))
+            }
+            "Color" => {
+                let n = parse_call_args("Color", raw)?;
+                let [r, g, b, a] = <[f64; 4]>::try_from(n).ok()?;
+                let (r, g, b, a) = (r as f32, g as f32, b as f32, a as f32);
+                Some(quote!(::godot_core::builtin::Color::new(#r, #g, #b, #a)))
+            }
+            "Vector2" => {
+                let n = parse_call_args("Vector2", raw)?;
+                let [x, y] = <[f64; 2]>::try_from(n).ok()?;
+                Some(quote!(::godot_core::builtin::Vector2::new(
+                    #x as ::godot_core::builtin::Real,
+                    #y as ::godot_core::builtin::Real
+                )))
+            }
+            "Vector2i" => {
+                let n = parse_call_args("Vector2i", raw)?;
+                let [x, y] = <[f64; 2]>::try_from(n).ok()?;
+                let (x, y) = (x as i32, y as i32);
+                Some(quote!(::godot_core::builtin::Vector2i::new(#x, #y)))
+            }
+            "Vector3" => {
+                let n = parse_call_args("Vector3", raw)?;
+                let [x, y, z] = <[f64; 3]>::try_from(n).ok()?;
+                Some(quote!(::godot_core::builtin::Vector3::new(
+                    #x as ::godot_core::builtin::Real,
+                    #y as ::godot_core::builtin::Real,
+                    #z as ::godot_core::builtin::Real
+                )))
+            }
+            _ => None,
+        },
+
+        _ => None,
+    }
+}
+
+/// `"abc"` -> `abc`
+fn strip_quotes(raw: &str) -> Option<String> {
+    let inner = raw.strip_prefix('"')?.strip_suffix('"')?;
+    Some(inner.to_string())
+}
+
+/// `Color(1, 1, 1, 1)` -> `[1.0, 1.0, 1.0, 1.0]`
+fn parse_call_args(name: &str, raw: &str) -> Option<Vec<f64>> {
+    let inner = raw
+        .strip_prefix(name)?
+        .trim()
+        .strip_prefix('(')?
+        .strip_suffix(')')?;
+    inner
+        .split(',')
+        .map(|part| part.trim().parse::<f64>().ok())
+        .collect()
+}

@@ -156,6 +156,8 @@ Built and covered by the integration tests:
   `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
 - Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
   than a bare integer
+- Default arguments: a method with defaults gets a short form taking only the required
+  arguments, plus an `_ex` form taking all of them
 - Frame-driven `async` (`godot-async`)
 - Editor-only classes behind the `editor` feature
 
@@ -166,7 +168,6 @@ Built and covered by the integration tests:
   virtual ones, which an extension overrides rather than calls. The build prints the counts.
 - Callables built from a Rust closure; `Callable` currently references a registered method
   by name.
-- Default arguments
 - `EditorPlugin` beyond registration; no editor UI integration
 - Hot reload: the ABI is wired up (`recreate_instance_func`), but it is untested
 - Windows, Android and iOS are not covered by CI
