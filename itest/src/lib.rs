@@ -350,6 +350,52 @@ impl RustTestNode {
         self.panic_in_virtual = true;
     }
 
+    // -- Benchmarks ---------------------------------------------------------------------
+
+    /// Sums 0..n in Rust. Compared against the same loop in GDScript, this measures what the
+    /// language buys once the call overhead is amortised over real work.
+    #[func]
+    fn bench_sum(&mut self, n: i64) -> i64 {
+        let mut total: i64 = 0;
+        for i in 0..n {
+            total = total.wrapping_add(i);
+        }
+        total
+    }
+
+    /// Does nothing. Called in a loop from GDScript, this isolates the cost of crossing the
+    /// boundary from the cost of the work.
+    #[func]
+    fn bench_noop(&mut self) {}
+
+    /// Calls an engine method `n` times through ptrcall, to price the generated bindings.
+    #[func]
+    fn bench_engine_calls(&mut self, n: i64) -> i64 {
+        let Some(node) = Gd::<classes::Node>::new() else {
+            return -1;
+        };
+
+        let mut len = 0i64;
+        for _ in 0..n {
+            // get_name returns a StringName, so this covers a call plus a builtin return.
+            len += node.get_name().to_rust_string().len() as i64;
+        }
+
+        unsafe { node.free() };
+        len
+    }
+
+    /// Constructs `n` StringNames, which every engine call by name has to do.
+    #[func]
+    fn bench_stringname(&mut self, n: i64) -> i64 {
+        let mut total = 0i64;
+        for _ in 0..n {
+            let s = StringName::new("some_method_name");
+            total += s.to_rust_string().len() as i64;
+        }
+        total
+    }
+
     /// Proves per-instance state actually lives across calls.
     #[func]
     fn bump(&mut self) -> i64 {

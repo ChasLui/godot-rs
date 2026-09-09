@@ -195,7 +195,26 @@ Built and covered by the integration tests:
 ```bash
 ./check.sh              # fmt, clippy, unit tests, integration tests, editor tests
 ./check.sh itest        # integration tests only (needs Godot 4.7.2)
+./check.sh bench        # measure call overhead against GDScript
 ```
+
+### Performance
+
+`./check.sh bench` builds in release and reports, on this machine:
+
+| | GDScript | Rust |
+|---|---|---|
+| 200k-iteration loop | 8092 µs | 16 µs |
+| call overhead, per call | 0.25 µs | 0.16 µs |
+| engine method via `ptrcall` | — | 0.08 µs |
+| `StringName::new` | — | 0.73 µs |
+
+Absolute numbers vary by machine; the ratios are the point. Calling into Rust is no more
+expensive than a GDScript-to-GDScript call, so the boundary is not what to design around.
+
+Constructing a `StringName` costs several engine calls, because the engine interns it. A name
+used every frame -- a signal being emitted, a method called by name -- is worth building once
+and keeping rather than rebuilding in the loop.
 
 `check.sh` finds Godot via `$GODOT4_BIN`, then `/Applications/Godot.app`, then `godot4`/`godot`
 on the path. Every engine run is time-limited: Godot does not exit when a GDScript fails to

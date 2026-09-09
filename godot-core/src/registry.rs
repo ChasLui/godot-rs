@@ -152,9 +152,11 @@ unsafe extern "C" fn create_instance<T: GodotClass>(
     let base_name = StringName::new(T::BASE_NAME);
     let object = sys::interface_fn!(classdb_construct_object2)(base_name.as_ptr());
 
-    let instance = match crate::panics::catch(&format!("{}::init", T::CLASS_NAME), None, || {
-        Some(Box::into_raw(Box::new(T::init())))
-    }) {
+    let instance = match crate::panics::catch(
+        || format!("{}::init", T::CLASS_NAME),
+        None,
+        || Some(Box::into_raw(Box::new(T::init()))),
+    ) {
         Some(ptr) => ptr,
         // Without Rust state the object would fault on its first call; better an object the
         // engine reports as missing than one that crashes later.
@@ -220,9 +222,11 @@ unsafe extern "C" fn to_string<T: GodotClass>(
     }
 
     let this = &mut *(instance as *mut T);
-    match crate::panics::catch(&format!("{}::to_string", T::CLASS_NAME), None, || {
-        this.godot_to_string()
-    }) {
+    match crate::panics::catch(
+        || format!("{}::to_string", T::CLASS_NAME),
+        None,
+        || this.godot_to_string(),
+    ) {
         Some(s) => {
             if !is_valid.is_null() {
                 *is_valid = true as sys::GDExtensionBool;
@@ -295,7 +299,7 @@ unsafe extern "C" fn get_property_list<T: GodotClass>(
 
     let this = &mut *(instance as *mut T);
     let descs = crate::panics::catch(
-        &format!("{}::get_property_list", T::CLASS_NAME),
+        || format!("{}::get_property_list", T::CLASS_NAME),
         Vec::new(),
         || this.godot_get_property_list(),
     );
@@ -376,9 +380,11 @@ unsafe extern "C" fn notification<T: GodotClass>(
         return;
     }
     let this = &mut *(instance as *mut T);
-    crate::panics::catch(&format!("{}::notification", T::CLASS_NAME), (), || {
-        this.godot_notification(what, reversed != 0)
-    });
+    crate::panics::catch(
+        || format!("{}::notification", T::CLASS_NAME),
+        (),
+        || this.godot_notification(what, reversed != 0),
+    );
 }
 
 unsafe extern "C" fn get_property<T: GodotClass>(
@@ -392,9 +398,11 @@ unsafe extern "C" fn get_property<T: GodotClass>(
     let this = &mut *(instance as *mut T);
     let name = StringName::from_sys_copy(name).to_rust_string();
 
-    match crate::panics::catch(&format!("{}::get", T::CLASS_NAME), None, || {
-        this.godot_get(&name)
-    }) {
+    match crate::panics::catch(
+        || format!("{}::get", T::CLASS_NAME),
+        None,
+        || this.godot_get(&name),
+    ) {
         Some(value) => {
             // The engine's slot is uninitialized and takes ownership of what is written.
             value.move_into(ret);
@@ -416,9 +424,11 @@ unsafe extern "C" fn set_property<T: GodotClass>(
     let name = StringName::from_sys_copy(name).to_rust_string();
     let value = crate::builtin::Variant::from_sys_copy(value);
 
-    crate::panics::catch(&format!("{}::set", T::CLASS_NAME), false, || {
-        this.godot_set(&name, &value)
-    }) as sys::GDExtensionBool
+    crate::panics::catch(
+        || format!("{}::set", T::CLASS_NAME),
+        false,
+        || this.godot_set(&name, &value),
+    ) as sys::GDExtensionBool
 }
 
 /// Registers `T` with Godot's ClassDB.

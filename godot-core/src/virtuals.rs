@@ -150,5 +150,9 @@ pub(crate) unsafe extern "C" fn call_virtual_with_data(
 
     // SAFETY: `userdata` is the trampoline this class returned from `get_virtual_call_data`.
     let trampoline: VirtualTrampoline = std::mem::transmute(userdata);
-    crate::panics::catch("a virtual method", (), || trampoline(instance, args, ret));
+    crate::panics::catch(
+        || "a virtual method".to_string(),
+        (),
+        || trampoline(instance, args, ret),
+    );
 }

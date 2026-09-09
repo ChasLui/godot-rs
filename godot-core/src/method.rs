@@ -55,7 +55,7 @@ unsafe extern "C" fn method_call<T: GodotClass>(
 
     let this = &mut *(instance as *mut T);
     let result = crate::panics::catch(
-        &format!("{}::{}", T::CLASS_NAME, userdata.name),
+        || format!("{}::{}", T::CLASS_NAME, userdata.name),
         Variant::nil(),
         || (userdata.func)(this, &owned_args),
     );

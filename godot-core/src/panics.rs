@@ -20,12 +20,16 @@ use std::panic::AssertUnwindSafe;
 /// is the guarantee that state is consistent after a panic -- and since the object survives, a
 /// later call can observe half-finished work. That is a worse outcome than an abort only if the
 /// inconsistency is silent, which is why the panic is always reported rather than swallowed.
-pub fn catch<R>(context: &str, fallback: R, body: impl FnOnce() -> R) -> R {
+pub fn catch<R>(context: impl FnOnce() -> String, fallback: R, body: impl FnOnce() -> R) -> R {
     match std::panic::catch_unwind(AssertUnwindSafe(body)) {
         Ok(value) => value,
         Err(payload) => {
+            // `context` is a closure so the message is built only when it is needed. Formatting
+            // it eagerly would cost an allocation on every call, panic or not, and these sit on
+            // the hot path between GDScript and Rust.
             crate::logging::godot_error(&format!(
-                "Rust panic in {context}: {}",
+                "Rust panic in {}: {}",
+                context(),
                 describe(&payload)
             ));
             fallback

@@ -24,6 +24,7 @@ for arg in "${args[@]}"; do
         echo "    test          run unit tests (no Godot)"
         echo "    itest         run integration tests (needs Godot 4)"
         echo "    etest         run the editor-mode integration test"
+        echo "    bench         measure call overhead against GDScript (build release first)"
         echo "    doc           generate docs for the 'godot' crate"
         exit 0
     fi
@@ -175,6 +176,16 @@ for arg in "${args[@]}"; do
         cmds+=("cp $target_dir/debug/$lib itest/godot/lib/")
         cmds+=("ensureImported itest/godot")
         cmds+=("runEditorTest")
+        ;;
+    bench)
+        findGodot
+        lib=$(libName)
+        target_dir=$(cargo metadata --format-version 1 --no-deps | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')
+        # Release only: a debug build measures the optimiser, not the binding.
+        cmds+=("cargo build --release -p itest")
+        cmds+=("cp $target_dir/release/$lib itest/godot/lib/")
+        cmds+=("ensureImported itest/godot")
+        cmds+=("runGodot 180 $godotBin --headless --path itest/godot --scene res://bench/Bench.tscn")
         ;;
     doc)
         cmds+=("cargo doc --lib -p godot --no-deps")
