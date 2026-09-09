@@ -79,8 +79,13 @@ jobs:
           unzip -q godot.zip -d godot-bin
           if [[ "${{ matrix.os }}" == macos-* ]]; then
             echo "GODOT4_BIN=$PWD/godot-bin/Godot.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+          elif [[ "${{ matrix.os }}" == windows-* ]]; then
+            # The Windows archive ships two executables; the console one writes its output to
+            # stdout, which is what the tests read.
+            binary=$(find godot-bin -maxdepth 1 -type f -name 'Godot_v*_console.exe' | head -1)
+            echo "GODOT4_BIN=$PWD/$binary" >> "$GITHUB_ENV"
           else
-            binary=$(find godot-bin -maxdepth 1 -type f -name 'Godot_v*')
+            binary=$(find godot-bin -maxdepth 1 -type f -name 'Godot_v*' | head -1)
             chmod +x "$binary"
             echo "GODOT4_BIN=$PWD/$binary" >> "$GITHUB_ENV"
           fi
