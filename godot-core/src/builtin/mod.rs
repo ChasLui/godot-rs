@@ -5,9 +5,9 @@ mod string_name;
 mod variant;
 
 pub use collection::{
-    Dictionary, NodePath, PackedByteArray, PackedColorArray, PackedFloat32Array,
+    ArrayElement, Dictionary, NodePath, PackedByteArray, PackedColorArray, PackedFloat32Array,
     PackedFloat64Array, PackedInt32Array, PackedInt64Array, PackedStringArray, PackedVector2Array,
-    PackedVector3Array, PackedVector4Array, VariantArray,
+    PackedVector3Array, PackedVector4Array, TypedArray, VariantArray,
 };
 pub use math::{
     Basis, Color, Plane, Projection, Quaternion, Real, Rect2, Rect2i, Rid, Transform2D,

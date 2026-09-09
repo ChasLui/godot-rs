@@ -522,3 +522,176 @@ unsafe impl crate::ptrcall::PtrcallRet for () {
         call(std::ptr::null_mut());
     }
 }
+
+/// A type that can be an element of a Godot typed array.
+///
+/// Godot stores an array's element type inside the container, so creating one from Rust means
+/// telling the engine which type it holds -- hence `variant_type` and, for objects, `class_name`.
+pub trait ArrayElement: ToGodot + FromGodot {
+    /// The Variant type of the elements.
+    fn variant_type() -> sys::GDExtensionVariantType;
+
+    /// For object elements, the engine class name; empty for everything else.
+    fn class_name() -> &'static str {
+        ""
+    }
+}
+
+macro_rules! impl_array_element {
+    ($($t:ty => $tag:ident),* $(,)?) => {
+        $(
+            impl ArrayElement for $t {
+                fn variant_type() -> sys::GDExtensionVariantType {
+                    sys::$tag
+                }
+            }
+        )*
+    };
+}
+
+impl_array_element!(
+    bool => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_BOOL,
+    i64 => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_INT,
+    f64 => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_FLOAT,
+    super::GString => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+    StringName => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+    NodePath => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NODE_PATH,
+    Variant => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL,
+    VariantArray => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_ARRAY,
+    Dictionary => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_DICTIONARY,
+    super::Vector2 => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_VECTOR2,
+    super::Vector3 => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_VECTOR3,
+    super::Vector4 => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_VECTOR4,
+    super::Color => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_COLOR,
+    super::Plane => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PLANE,
+    super::Rid => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_RID,
+);
+
+impl<T: crate::obj::GodotObject> ArrayElement for crate::obj::Gd<T> {
+    fn variant_type() -> sys::GDExtensionVariantType {
+        sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_OBJECT
+    }
+
+    fn class_name() -> &'static str {
+        T::CLASS_NAME
+    }
+}
+
+/// An `Array` whose elements the engine constrains to one type.
+///
+/// Laid out exactly like [`VariantArray`] -- Godot keeps the element type inside the container,
+/// not in the handle -- so this is a zero-cost wrapper that adds typed access.
+#[repr(transparent)]
+pub struct TypedArray<T: ArrayElement> {
+    inner: VariantArray,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: ArrayElement> TypedArray<T> {
+    /// Creates an array the engine knows is typed as `T`.
+    ///
+    /// Constructor 2 is the one that attaches the element type; using the plain constructor
+    /// would produce an untyped array, which the engine rejects where a typed one is expected.
+    pub fn new() -> Self {
+        let base = VariantArray::new();
+        let elem_type = T::variant_type() as i64;
+        let class_name = StringName::new(T::class_name());
+        let script = Variant::nil();
+
+        // SAFETY: the argument list matches constructor 2's signature
+        // (Array base, int type, StringName class_name, Variant script).
+        unsafe {
+            let mut opaque = MaybeUninit::<[u8; sys::builtin_sizes::SIZE_ARRAY]>::uninit();
+            let ctor = constructor(VariantArray::VARIANT_TYPE, 2).unwrap();
+            let args: [sys::GDExtensionConstTypePtr; 4] = [
+                base.as_ptr(),
+                &elem_type as *const i64 as sys::GDExtensionConstTypePtr,
+                class_name.as_ptr() as sys::GDExtensionConstTypePtr,
+                script.as_ptr() as sys::GDExtensionConstTypePtr,
+            ];
+            ctor(
+                opaque.as_mut_ptr() as sys::GDExtensionUninitializedTypePtr,
+                args.as_ptr(),
+            );
+
+            Self {
+                inner: std::mem::transmute::<[u8; sys::builtin_sizes::SIZE_ARRAY], VariantArray>(
+                    opaque.assume_init(),
+                ),
+                _marker: std::marker::PhantomData,
+            }
+        }
+    }
+
+    pub fn len(&self) -> i64 {
+        self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Reads the element at `index`, or `None` if it is out of range or the wrong type.
+    pub fn get(&self, index: i64) -> Option<T> {
+        T::try_from_variant(&self.inner.get(index))
+    }
+
+    pub fn push(&mut self, value: &T) {
+        self.inner.push(&value.to_variant());
+    }
+
+    /// Drops the element type, giving an untyped view of the same container.
+    pub fn to_untyped(&self) -> VariantArray {
+        self.inner.clone()
+    }
+
+    pub fn as_ptr(&self) -> sys::GDExtensionConstTypePtr {
+        self.inner.as_ptr()
+    }
+}
+
+impl<T: ArrayElement> Default for TypedArray<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T: ArrayElement> Clone for TypedArray<T> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+// Same representation as VariantArray, so the marshalling is the same too.
+unsafe impl<T: ArrayElement> crate::ptrcall::PtrcallArg for TypedArray<T> {}
+
+unsafe impl<T: ArrayElement> crate::ptrcall::PtrcallRet for TypedArray<T> {
+    unsafe fn from_ptrcall<F>(call: F) -> Self
+    where
+        F: FnOnce(sys::GDExtensionTypePtr),
+    {
+        Self {
+            inner: VariantArray::from_ptrcall(call),
+            _marker: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: ArrayElement> ToGodot for TypedArray<T> {
+    fn to_variant(&self) -> Variant {
+        self.inner.to_variant()
+    }
+}
+
+impl<T: ArrayElement> FromGodot for TypedArray<T> {
+    fn try_from_variant(variant: &Variant) -> Option<Self> {
+        // The engine guarantees the element type; only the container type is checked here.
+        VariantArray::try_from_variant(variant).map(|inner| Self {
+            inner,
+            _marker: std::marker::PhantomData,
+        })
+    }
+}

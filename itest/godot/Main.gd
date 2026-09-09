@@ -251,6 +251,18 @@ func test_collections() -> void:
 	check(n.node_path_roundtrip("../Sibling/Child") == NodePath("../Sibling/Child"),
 		"NodePath round trip")
 
+	# A typed array must actually carry its element type, not just happen to hold ints:
+	# is_typed() is what an engine API expecting Array[int] checks.
+	var ti: Array = n.make_typed_ints(3)
+	check(ti == [0, 3, 6], "typed array contents, got %s" % [ti])
+	check(ti.is_typed(), "array built by Rust is not typed")
+	check(ti.get_typed_builtin() == TYPE_INT,
+		"typed array element type is %d, expected TYPE_INT" % ti.get_typed_builtin())
+
+	# A typed array coming back from a real engine call (Node.get_children).
+	check(n.count_children_via_typed_array() == 3,
+		"typed array from get_children, got %d" % n.count_children_via_typed_array())
+
 	# Repeated create/clone/drop: a destructor mistake corrupts memory on a later round.
 	# 20 rounds x (1 array + 1 dict + 1 string array) = 60.
 	check(n.collection_churn(20) == 60, "collection churn, got %d" % n.collection_churn(20))

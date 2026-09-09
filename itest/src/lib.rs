@@ -5,8 +5,8 @@
 //! path a real user's code takes.
 
 use godot::builtin::{
-    Color, Dictionary, NodePath, PackedByteArray, PackedStringArray, Transform2D, VariantArray,
-    Vector3,
+    Color, Dictionary, NodePath, PackedByteArray, PackedStringArray, Transform2D, TypedArray,
+    VariantArray, Vector3,
 };
 use godot::classes;
 use godot::prelude::*;
@@ -399,6 +399,48 @@ impl RustTestNode {
     #[func]
     fn node_path_roundtrip(&mut self, path: GString) -> NodePath {
         NodePath::from_path(&path.to_rust_string())
+    }
+
+    /// Builds a typed array in Rust. GDScript checks that the engine really considers it typed,
+    /// not merely an Array that happens to hold ints.
+    #[func]
+    fn make_typed_ints(&mut self, count: i64) -> TypedArray<i64> {
+        let mut a = TypedArray::<i64>::new();
+        for i in 0..count {
+            a.push(&(i * 3));
+        }
+        a
+    }
+
+    /// Reads a typed array produced by the engine, through a real engine call.
+    ///
+    /// `Node::get_children` returns `typedarray::Node`, so this exercises the generated
+    /// signature rather than a hand-made array.
+    #[func]
+    fn count_children_via_typed_array(&mut self) -> i64 {
+        let Some(parent) = Gd::<classes::Node>::new() else {
+            return -1;
+        };
+
+        for _ in 0..3 {
+            if let Some(child) = Gd::<classes::Node>::new() {
+                classes::Node::add_child(&parent, &child, false, 0);
+            }
+        }
+
+        let children = classes::Node::get_children(&parent, false);
+        let count = children.len();
+
+        // Reading an element back proves the typed accessor works, not just the length.
+        let first_is_node = children.get(0).is_some();
+
+        unsafe { parent.free() };
+
+        if first_is_node {
+            count
+        } else {
+            -2
+        }
     }
 
     /// Creates and drops containers in a loop. A destructor mistake usually survives the first

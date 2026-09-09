@@ -16,6 +16,8 @@ pub enum RustTy {
     Variant,
     /// An engine enum; Godot passes these as 64-bit integers through ptrcall.
     Enum,
+    /// `TypedArray<T>` -- an `Array` whose element type the engine enforces.
+    TypedArray(Box<RustTy>),
 }
 
 impl RustTy {
@@ -37,6 +39,23 @@ impl RustTy {
             }
             RustTy::Variant => quote!(::godot_core::builtin::Variant),
             RustTy::Enum => quote!(i64),
+            RustTy::TypedArray(elem) => {
+                // The element appears by value inside the generic, even when it is an object:
+                // `TypedArray<Gd<Node>>`, not `TypedArray<&Gd<Node>>`.
+                let elem_tokens = elem.owned_tokens();
+                quote!(::godot_core::builtin::TypedArray<#elem_tokens>)
+            }
+        }
+    }
+
+    /// The Rust type when it appears by value, e.g. as a generic parameter.
+    fn owned_tokens(&self) -> TokenStream {
+        match self {
+            RustTy::Object(class) => {
+                let ident = format_ident!("{}", class);
+                quote!(::godot_core::obj::Gd<crate::classes::#ident>)
+            }
+            other => other.arg_tokens(),
         }
     }
 
@@ -66,9 +85,14 @@ pub fn map_type(
         return Some(RustTy::Enum);
     }
 
-    // Typed arrays and container generics are not supported yet.
-    if godot_type.starts_with("typedarray::") {
-        return None;
+    // A typed array's element type is resolved recursively; a nested typed array is not
+    // something the engine produces, so one level is enough.
+    if let Some(elem) = godot_type.strip_prefix("typedarray::") {
+        let elem_ty = map_type(elem, None, is_class)?;
+        if matches!(elem_ty, RustTy::Void | RustTy::Enum) {
+            return None;
+        }
+        return Some(RustTy::TypedArray(Box::new(elem_ty)));
     }
 
     // Pointer-typed arguments (native structures) are out of scope.

@@ -296,6 +296,18 @@ fn generate_class(
     (tokens, generated, skipped)
 }
 
+/// Whether every class this type mentions was actually generated.
+///
+/// Has to recurse: a `TypedArray<Gd<Foo>>` is unusable if `Foo` is outside the generated set,
+/// even though the type at the top level is a builtin.
+fn all_classes_available(ty: &RustTy, selected: &HashSet<&str>) -> bool {
+    match ty {
+        RustTy::Object(name) => selected.contains(name.as_str()),
+        RustTy::TypedArray(elem) => all_classes_available(elem, selected),
+        _ => true,
+    }
+}
+
 fn generate_method(
     class: &Class,
     method: &api::Method,
@@ -308,10 +320,8 @@ fn generate_method(
         None => RustTy::Void,
         Some(ret) => map_type(&ret.type_, ret.meta.as_deref(), is_class)?,
     };
-    if let RustTy::Object(ref name) = ret_ty {
-        if !selected.contains(name.as_str()) {
-            return None;
-        }
+    if !all_classes_available(&ret_ty, selected) {
+        return None;
     }
 
     // Arguments.
@@ -319,10 +329,8 @@ fn generate_method(
     let mut arg_types = Vec::new();
     for arg in &method.arguments {
         let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
-        if let RustTy::Object(ref name) = ty {
-            if !selected.contains(name.as_str()) {
-                return None;
-            }
+        if !all_classes_available(&ty, selected) {
+            return None;
         }
         if ty == RustTy::Void {
             return None;
@@ -448,10 +456,8 @@ fn generate_vararg_method(
 
     for arg in &method.arguments {
         let ty = map_type(&arg.type_, arg.meta.as_deref(), is_class)?;
-        if let RustTy::Object(ref name) = ty {
-            if !selected.contains(name.as_str()) {
-                return None;
-            }
+        if !all_classes_available(&ty, selected) {
+            return None;
         }
         if ty == RustTy::Void || ty == RustTy::Enum {
             // Enums have no Variant conversion of their own yet.
