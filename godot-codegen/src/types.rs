@@ -20,7 +20,42 @@ pub enum RustTy {
     TypedArray(Box<RustTy>),
 }
 
+/// Builtins whose Rust struct is `Copy`: flat data the engine passes by value.
+///
+/// Everything else owns engine memory, so taking it by value in an argument would force the
+/// caller to clone at every call site.
+fn is_copy_builtin(name: &str) -> bool {
+    matches!(
+        name,
+        "Vector2"
+            | "Vector2i"
+            | "Vector3"
+            | "Vector3i"
+            | "Vector4"
+            | "Color"
+            | "Rect2"
+            | "Rect2i"
+            | "Transform2D"
+            | "Transform3D"
+            | "Basis"
+            | "Quaternion"
+            | "AABB"
+            | "Plane"
+            | "Projection"
+            | "Rid"
+    )
+}
+
 impl RustTy {
+    /// Whether an argument of this type is passed by reference.
+    pub fn is_by_ref(&self) -> bool {
+        match self {
+            RustTy::Object(_) | RustTy::Variant | RustTy::TypedArray(_) => true,
+            RustTy::Builtin(name) => !is_copy_builtin(name),
+            _ => false,
+        }
+    }
+
     /// The Rust type as it appears in an argument position.
     pub fn arg_tokens(&self) -> TokenStream {
         match self {
@@ -31,29 +66,42 @@ impl RustTy {
             }
             RustTy::Builtin(name) => {
                 let ident = format_ident!("{}", *name);
-                quote!(::godot_core::builtin::#ident)
+                if is_copy_builtin(name) {
+                    quote!(::godot_core::builtin::#ident)
+                } else {
+                    quote!(&::godot_core::builtin::#ident)
+                }
             }
             RustTy::Object(class) => {
                 let ident = format_ident!("{}", class);
                 quote!(&::godot_core::obj::Gd<crate::classes::#ident>)
             }
-            RustTy::Variant => quote!(::godot_core::builtin::Variant),
+            RustTy::Variant => quote!(&::godot_core::builtin::Variant),
             RustTy::Enum => quote!(i64),
             RustTy::TypedArray(elem) => {
                 // The element appears by value inside the generic, even when it is an object:
                 // `TypedArray<Gd<Node>>`, not `TypedArray<&Gd<Node>>`.
                 let elem_tokens = elem.owned_tokens();
-                quote!(::godot_core::builtin::TypedArray<#elem_tokens>)
+                quote!(&::godot_core::builtin::TypedArray<#elem_tokens>)
             }
         }
     }
 
-    /// The Rust type when it appears by value, e.g. as a generic parameter.
-    fn owned_tokens(&self) -> TokenStream {
+    /// The Rust type when it appears by value: return position, or a generic parameter.
+    pub fn owned_tokens(&self) -> TokenStream {
         match self {
             RustTy::Object(class) => {
                 let ident = format_ident!("{}", class);
                 quote!(::godot_core::obj::Gd<crate::classes::#ident>)
+            }
+            RustTy::Builtin(name) => {
+                let ident = format_ident!("{}", *name);
+                quote!(::godot_core::builtin::#ident)
+            }
+            RustTy::Variant => quote!(::godot_core::builtin::Variant),
+            RustTy::TypedArray(elem) => {
+                let elem_tokens = elem.owned_tokens();
+                quote!(::godot_core::builtin::TypedArray<#elem_tokens>)
             }
             other => other.arg_tokens(),
         }
@@ -66,7 +114,7 @@ impl RustTy {
                 let ident = format_ident!("{}", class);
                 quote!(Option<::godot_core::obj::Gd<crate::classes::#ident>>)
             }
-            other => other.arg_tokens(),
+            other => other.owned_tokens(),
         }
     }
 }

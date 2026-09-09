@@ -7,6 +7,7 @@
 //! gap is never silent.
 
 pub mod api;
+pub mod builtins;
 pub mod types;
 
 use api::{Api, Class};
@@ -355,10 +356,13 @@ fn generate_method(
     let arg_ptrs: Vec<TokenStream> = arg_names
         .iter()
         .zip(&arg_types)
-        .map(|(name, ty)| match ty {
-            // Object parameters arrive as `&Gd<T>` already; everything else is by value.
-            RustTy::Object(_) => quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(#name)),
-            _ => quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(&#name)),
+        .map(|(name, ty)| {
+            // By-ref parameters are already references; by-value ones need addressing.
+            if ty.is_by_ref() {
+                quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(#name))
+            } else {
+                quote!(::godot_core::ptrcall::PtrcallArg::arg_ptr(&#name))
+            }
         })
         .collect();
 
@@ -483,10 +487,12 @@ fn generate_vararg_method(
     let to_variants: Vec<TokenStream> = arg_names
         .iter()
         .zip(&arg_types)
-        .map(|(name, ty)| match ty {
-            // Object parameters arrive as `&Gd<T>` already; everything else is by value.
-            RustTy::Object(_) => quote!(::godot_core::builtin::ToGodot::to_variant(#name)),
-            _ => quote!(::godot_core::builtin::ToGodot::to_variant(&#name)),
+        .map(|(name, ty)| {
+            if ty.is_by_ref() {
+                quote!(::godot_core::builtin::ToGodot::to_variant(#name))
+            } else {
+                quote!(::godot_core::builtin::ToGodot::to_variant(&#name))
+            }
         })
         .collect();
 

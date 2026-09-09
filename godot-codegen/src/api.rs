@@ -10,8 +10,35 @@ pub struct Api {
     pub header: Header,
     pub global_enums: Vec<GlobalEnum>,
     pub utility_functions: Vec<UtilityFunction>,
+    pub builtin_classes: Vec<BuiltinClass>,
     pub classes: Vec<Class>,
     pub singletons: Vec<Singleton>,
+}
+
+/// One of Godot's builtin (Variant) types.
+#[derive(Deserialize)]
+pub struct BuiltinClass {
+    pub name: String,
+    #[serde(default)]
+    pub methods: Vec<BuiltinMethod>,
+}
+
+/// Builtin methods differ from class methods: the return type is a bare string rather than a
+/// nested object, and there is no virtual/hash-optional case.
+#[derive(Deserialize)]
+pub struct BuiltinMethod {
+    pub name: String,
+    #[serde(default)]
+    pub return_type: Option<String>,
+    #[serde(default)]
+    pub is_vararg: bool,
+    #[serde(default)]
+    pub is_const: bool,
+    #[serde(default)]
+    pub is_static: bool,
+    pub hash: i64,
+    #[serde(default)]
+    pub arguments: Vec<Argument>,
 }
 
 #[derive(Deserialize)]

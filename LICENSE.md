@@ -1,6 +1,7 @@
 MIT License
 
 Copyright (c) 2017-2022 The godot-rust team
+Copyright (c) 2026 ChasLui (godot-rs)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

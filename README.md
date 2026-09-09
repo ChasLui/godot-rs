@@ -1,4 +1,4 @@
-# godot-rust for Godot 4 (GDExtension)
+# godot-rs
 
 [![CI](https://github.com/ChasLui/godot-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/ChasLui/godot-rs/actions/workflows/ci.yml)
 [![Godot 4.7.2](https://img.shields.io/badge/Godot-4.7.2-478CBF?logo=godotengine&logoColor=white)](https://godotengine.org)
@@ -151,15 +151,14 @@ Built and covered by the integration tests:
 - `Gd<T>` object handles with automatic reference counting
 - Generated bindings for a subset of the engine API, called through `ptrcall`, plus variadic
   methods (`emit_signal`, `call`, `rpc`) through the Variant path
+- Generated methods on the builtin types themselves (`String::find`, `Array::sort`,
+  `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
 - Frame-driven `async` (`godot-async`)
 - Editor-only classes behind the `editor` feature
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
 - `Callable` and `Signal` as first-class types
-- Container element access beyond the basics: the `Packed*Array` types can be passed and
-  measured, but only `PackedStringArray` and `PackedByteArray` have `get`/`push` so far.
-  Builtin methods are hand-written rather than generated.
 - Only 106 of the engine's 1036 classes are generated (the closure of a seed set; see
   `godot-codegen/src/lib.rs`). The build prints how many methods were skipped.
 - Default arguments, and engine enums as Rust types (they surface as `i64`)
@@ -209,4 +208,4 @@ reproduce with `is_exposed = false` or with a non-`Node` base class. Root cause 
 
 ## License
 
-MIT, as inherited from godot-rust. See [LICENSE.md](LICENSE.md).
+MIT, inherited from the upstream godot-rust project. See [LICENSE.md](LICENSE.md).

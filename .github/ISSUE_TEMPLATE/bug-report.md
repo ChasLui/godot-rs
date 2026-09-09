@@ -14,6 +14,7 @@ For missing functionality, open a 'Feature request' instead.
 For functionality that works but is not very accessible, open a 'Quality of life' issue instead.
 
 In your bug report, please mention how to reproduce the problem and if possible, provide short example code.
-In case you're not working on latest master, specify which godot-rust version you use.
+If you are not on latest master, say which commit you are on. Also state your Godot
+version: these bindings target the one recorded in godot-sys/gdextension/VERSION.
 -->
 

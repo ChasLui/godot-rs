@@ -251,6 +251,19 @@ func test_collections() -> void:
 	check(n.node_path_roundtrip("../Sibling/Child") == NodePath("../Sibling/Child"),
 		"NodePath round trip")
 
+	# Methods generated from the API dump. Compared field by field against GDScript computing the
+	# same thing, so the check does not depend on how each language formats floats.
+	var parts: PackedStringArray = str(n.generated_builtin_methods()).split(",")
+	if parts.size() != 5:
+		failures.append("generated_builtin_methods returned %s" % n.generated_builtin_methods())
+	else:
+		check(int(parts[0]) == "hello world".find("world"), "String.find, got %s" % parts[0])
+		check(float(parts[1]) == 4.0, "PackedFloat32Array push_back/get, got %s" % parts[1])
+		check(float(parts[2]) == 2.0 and float(parts[3]) == 2.0,
+			"Vector2.clamp, got (%s, %s)" % [parts[2], parts[3]])
+		check(float(parts[4]) == Vector2(3, 4).length(),
+			"hand-written Vector2.length, got %s" % parts[4])
+
 	# A typed array must actually carry its element type, not just happen to hold ints:
 	# is_typed() is what an engine API expecting Array[int] checks.
 	var ti: Array = n.make_typed_ints(3)

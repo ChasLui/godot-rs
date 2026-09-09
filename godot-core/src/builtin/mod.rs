@@ -1,4 +1,4 @@
-mod collection;
+pub(crate) mod collection;
 mod math;
 mod string;
 mod string_name;
@@ -16,3 +16,6 @@ pub use math::{
 pub use string::GString;
 pub use string_name::StringName;
 pub use variant::{FromGodot, ToGodot, Variant};
+
+// Methods generated from `extension_api.json`, attached to the structs above.
+include!(concat!(env!("OUT_DIR"), "/builtin_methods.rs"));

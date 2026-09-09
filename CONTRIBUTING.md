@@ -1,62 +1,54 @@
-# Contributing to the godot-rust library
+# Contributing to godot-rs
 
-The godot-rust bindings developers welcome contribution from everyone. Here are the guidelines if you are thinking of helping us:
+Contributions are welcome. This is a small, independent binding, so the process is
+correspondingly light.
 
+## Before you start
 
-## Submitting a PR
+Read the [Scope section of the README](README.md#scope). It states plainly what is implemented
+and what is not, so you can tell whether something is a bug or a feature that was never built.
 
-Contributions should be made in the form of GitHub pull requests (PRs). Each pull request will be reviewed by the godot-rust team or other contributors.
+## Making a change
 
+1. Open an issue first for anything substantial, so the design can be discussed before the work.
+2. Keep the change focused; unrelated cleanups belong in their own commit.
+3. Run the full check before pushing:
 
-### Picking a task
+   ```bash
+   ./check.sh
+   ```
 
-Have a look at the [issue tracker] to find good tasks to start with. Should you wish to work on an issue, please claim it first by commenting in it. This is to prevent duplicated efforts from contributors on the same issue.
+   This runs `rustfmt`, `clippy` (warnings are errors), the unit tests, and the integration
+   tests against a real Godot 4.7.2. `check.sh` finds the engine via `$GODOT4_BIN`, then
+   `/Applications/Godot.app`, then `godot4`/`godot` on the path.
 
-We especially appreciate input on the issues labeled [`help wanted`]. The label [`good first issue`] encompasses issues which do not require a deep prior knowledge of the godot-rust intricacies and could be picked up by a newcomer.
+## Tests are the specification
 
-You can also open a pull request directly without an associated issue. Note however that discussing the issue with other developers beforehand increases the chances of a PR being accepted, and may save time on both your and the reviewer's end. Such discussions can also happen in our Discord server.
+Anything that touches the engine boundary needs a test in [`itest/`](itest). Assertions live on
+the GDScript side and decide the process exit code, so a feature is verified through the same
+path a user's code takes -- not through a Rust-side mock.
 
+When adding one, check that it can actually fail: break the implementation on purpose and
+confirm the test goes red. Several bugs in this repository's history passed a test that only
+looked like it was checking something.
 
-### Git workflow
+## Working with the engine API
 
-* Branch from the `master` branch and, if needed, rebase to the current `master` branch before submitting your pull request. If it doesn't merge cleanly, you may be asked to rebase your changes.
+The bindings are generated from a vendored dump in `godot-sys/gdextension/`. That dump is the
+only source of truth for signatures, hashes and memory layouts -- do not copy them from the
+Godot source tree, which may be a different version.
 
-* Use one commit per logical change. Often, PRs only consist of a single commit. If you change unrelated parts of the code, split it into separate commits.
+To retarget a different Godot 4.x release:
 
-* If your patch is not getting reviewed or you need a specific person to review it, you can @-reply a reviewer asking for a review in the pull request or a comment.
+```bash
+cd godot-sys/gdextension
+godot --headless --dump-gdextension-interface --dump-extension-api
+godot --headless --version > VERSION
+```
 
+## Relationship to upstream
 
-### Writing tests
-
-Whenever applicable, add tests relevant to the fixed bug or new feature.
-
-Some types and functions can only be used if the engine is running. In order to test them, use the `godot_test!` macro, and explicitly invoke the test functions in [test/src/lib.rs](test/src/lib.rs). Don't hesitate to see how existing code does this.
-
-  
-### Local and CI checks
-
-The repository root contains a script `check.sh`. If you invoke it without arguments, it will run a list of basic checks locally. This tool also allows you to quickly build RustDoc documentation of changed APIs. Please run `./check.sh --help` for more information about its usage.
-
-If you use Windows, you might consider using a Unix shell interpreter (e.g. one shipped with Git-for-Windows, or WSL2, or similar).
-
-Additionally, when opening a PR, our continuous integration (CI) pipeline will automatically perform a few checks (formatting, lints, unit tests). Please make sure all of them pass, adjusting your code where necessary.
-
-
-## Communication
-
-Primary communication between developers of the project happens on the `godot-rust` Discord server. [Invite link here][godot-rust-discord].
-
-For questions about Godot, check out the options on the [Godot community page][godot-community]. For example, their Discord server hosts a `#godot-rust-dev` channel for questions regarding GDNative interface. The contributor chat is helpful in case of discussions about Godot's own design and implementation.
-
-If you are only interested in occasional announcements and showcases, follow [@GodotRust on Twitter][godot-rust-twitter]. For questions and design discussions, please use Discord.
-
-## License
-
-Any contribution submitted for inclusion in the work by you shall be licensed under the [MIT license](LICENSE.md), without any additional terms or conditions.
-
-[issue tracker]: https://github.com/godot-rust/godot-rust/issues
-[`help wanted`]: https://github.com/godot-rust/godot-rust/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22
-[`good first issue`]: https://github.com/godot-rust/godot-rust/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22
-[godot-community]: https://godotengine.org/community
-[godot-rust-discord]: https://discord.gg/FNudpBD
-[godot-rust-twitter]: https://twitter.com/GodotRust
+This repository began as a fork of [godot-rust/gdnative](https://github.com/godot-rust/gdnative)
+and was rewritten for Godot 4; it is not affiliated with the godot-rust project, and issues
+about it should be filed here rather than upstream. For their actively maintained Godot 4
+binding, see [gdext](https://github.com/godot-rust/gdext).

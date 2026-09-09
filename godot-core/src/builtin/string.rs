@@ -123,3 +123,27 @@ impl ToGodot for &str {
         GString::new(self).to_variant()
     }
 }
+
+impl Clone for GString {
+    fn clone(&self) -> Self {
+        // SAFETY: constructor 1 is the copy constructor for every builtin; `opaque` holds an
+        // initialized value.
+        unsafe {
+            let mut opaque = MaybeUninit::<[u8; sys::builtin_sizes::SIZE_STRING]>::uninit();
+            let ctor = crate::builtin::collection::constructor(
+                sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+                1,
+            )
+            .expect("engine has no copy constructor for GString");
+            let args: [sys::GDExtensionConstTypePtr; 1] =
+                [self.as_ptr() as sys::GDExtensionConstTypePtr];
+            ctor(
+                opaque.as_mut_ptr() as sys::GDExtensionUninitializedTypePtr,
+                args.as_ptr(),
+            );
+            Self {
+                opaque: opaque.assume_init(),
+            }
+        }
+    }
+}

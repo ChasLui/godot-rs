@@ -16,7 +16,7 @@ use std::mem::MaybeUninit;
 
 /// Resolves a builtin's constructor by index. Index 0 is always the default constructor and
 /// index 1 the copy constructor, for every type in this module.
-unsafe fn constructor(
+pub(crate) unsafe fn constructor(
     ty: sys::GDExtensionVariantType,
     index: i32,
 ) -> sys::GDExtensionPtrConstructor {
@@ -297,229 +297,56 @@ impl From<&str> for NodePath {
     }
 }
 
-/// Calls a builtin method that takes `args` and returns `R`.
+/// Rust-conventional names for the generated Godot ones, so container code reads naturally.
 ///
-/// # Safety
-/// The signature must match the method identified by `name`/`hash`.
-unsafe fn call_builtin<R>(
-    ty: sys::GDExtensionVariantType,
-    name: &str,
-    hash: i64,
-    base: sys::GDExtensionTypePtr,
-    args: &[sys::GDExtensionConstTypePtr],
-) -> R
-where
-    R: crate::ptrcall::PtrcallRet,
-{
-    let method = builtin_method(ty, name, hash).unwrap();
-    let args_ptr = if args.is_empty() {
-        std::ptr::null()
-    } else {
-        args.as_ptr()
-    };
-
-    R::from_ptrcall(|ret| {
-        method(base, args_ptr, ret, args.len() as i32);
-    })
-}
-
-/// The handful of operations that make a container usable from Rust without waiting for the
-/// full builtin-method generator. Hashes come from the vendored API dump.
-macro_rules! impl_len {
-    ($name:ident, $size_hash:literal, $empty_hash:literal) => {
-        impl $name {
-            /// Number of elements.
-            pub fn len(&self) -> i64 {
-                unsafe {
-                    call_builtin(
-                        Self::VARIANT_TYPE,
-                        "size",
-                        $size_hash,
-                        self.as_ptr() as sys::GDExtensionTypePtr,
-                        &[],
-                    )
+/// These are one-line forwards; the real implementations are generated from the API dump, which
+/// is also where the signature hashes come from -- there are none hard-coded here.
+macro_rules! rust_conventions {
+    ($($name:ident),* $(,)?) => {
+        $(
+            impl $name {
+                /// Number of elements. Godot spells this `size`.
+                pub fn len(&self) -> i64 {
+                    self.size()
                 }
             }
-
-            pub fn is_empty(&self) -> bool {
-                unsafe {
-                    call_builtin(
-                        Self::VARIANT_TYPE,
-                        "is_empty",
-                        $empty_hash,
-                        self.as_ptr() as sys::GDExtensionTypePtr,
-                        &[],
-                    )
-                }
-            }
-        }
+        )*
     };
 }
 
-// `size` and `is_empty` share one hash across every builtin, since the signature is identical.
-impl_len!(VariantArray, 3173160232, 3918633141);
-impl_len!(Dictionary, 3173160232, 3918633141);
-impl_len!(PackedByteArray, 3173160232, 3918633141);
-impl_len!(PackedInt32Array, 3173160232, 3918633141);
-impl_len!(PackedInt64Array, 3173160232, 3918633141);
-impl_len!(PackedFloat32Array, 3173160232, 3918633141);
-impl_len!(PackedFloat64Array, 3173160232, 3918633141);
-impl_len!(PackedStringArray, 3173160232, 3918633141);
-impl_len!(PackedVector2Array, 3173160232, 3918633141);
-impl_len!(PackedVector3Array, 3173160232, 3918633141);
-impl_len!(PackedColorArray, 3173160232, 3918633141);
-impl_len!(PackedVector4Array, 3173160232, 3918633141);
+rust_conventions!(
+    VariantArray,
+    Dictionary,
+    PackedByteArray,
+    PackedInt32Array,
+    PackedInt64Array,
+    PackedFloat32Array,
+    PackedFloat64Array,
+    PackedStringArray,
+    PackedVector2Array,
+    PackedVector3Array,
+    PackedColorArray,
+    PackedVector4Array,
+);
 
 impl VariantArray {
-    /// Appends a value.
+    /// Appends a value. Godot spells this `push_back`.
     pub fn push(&mut self, value: &Variant) {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [value.as_ptr() as sys::GDExtensionConstTypePtr];
-            let _: () = call_builtin(
-                Self::VARIANT_TYPE,
-                "push_back",
-                3316032543,
-                self.as_mut_ptr(),
-                &args,
-            );
-        }
-    }
-
-    /// Reads the element at `index`; out-of-range yields nil, as it does in GDScript.
-    pub fn get(&self, index: i64) -> Variant {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [&index as *const i64 as sys::GDExtensionConstTypePtr];
-            call_builtin(
-                Self::VARIANT_TYPE,
-                "get",
-                708700221,
-                self.as_ptr() as sys::GDExtensionTypePtr,
-                &args,
-            )
-        }
-    }
-}
-
-impl Dictionary {
-    /// Inserts or replaces a value.
-    pub fn set(&mut self, key: &Variant, value: &Variant) {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 2] = [
-                key.as_ptr() as sys::GDExtensionConstTypePtr,
-                value.as_ptr() as sys::GDExtensionConstTypePtr,
-            ];
-            let _: bool = call_builtin(
-                Self::VARIANT_TYPE,
-                "set",
-                2175348267,
-                self.as_mut_ptr(),
-                &args,
-            );
-        }
-    }
-
-    /// Looks up `key`, returning `default` when absent.
-    pub fn get_or(&self, key: &Variant, default: &Variant) -> Variant {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 2] = [
-                key.as_ptr() as sys::GDExtensionConstTypePtr,
-                default.as_ptr() as sys::GDExtensionConstTypePtr,
-            ];
-            call_builtin(
-                Self::VARIANT_TYPE,
-                "get",
-                2205440559,
-                self.as_ptr() as sys::GDExtensionTypePtr,
-                &args,
-            )
-        }
-    }
-
-    pub fn has(&self, key: &Variant) -> bool {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [key.as_ptr() as sys::GDExtensionConstTypePtr];
-            call_builtin(
-                Self::VARIANT_TYPE,
-                "has",
-                3680194679,
-                self.as_ptr() as sys::GDExtensionTypePtr,
-                &args,
-            )
-        }
+        self.push_back(value);
     }
 }
 
 impl PackedStringArray {
-    /// Appends a string.
+    /// Appends a string. Godot spells this `push_back`.
     pub fn push(&mut self, value: &super::GString) {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [value.as_ptr() as sys::GDExtensionConstTypePtr];
-            let _: bool = call_builtin(
-                Self::VARIANT_TYPE,
-                "push_back",
-                816187996,
-                self.as_mut_ptr(),
-                &args,
-            );
-        }
-    }
-
-    pub fn get(&self, index: i64) -> super::GString {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [&index as *const i64 as sys::GDExtensionConstTypePtr];
-            call_builtin(
-                Self::VARIANT_TYPE,
-                "get",
-                2162347432,
-                self.as_ptr() as sys::GDExtensionTypePtr,
-                &args,
-            )
-        }
+        self.push_back(value);
     }
 }
 
 impl PackedByteArray {
+    /// Appends a byte. Godot spells this `push_back`.
     pub fn push(&mut self, value: i64) {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [&value as *const i64 as sys::GDExtensionConstTypePtr];
-            let _: bool = call_builtin(
-                Self::VARIANT_TYPE,
-                "push_back",
-                694024632,
-                self.as_mut_ptr(),
-                &args,
-            );
-        }
-    }
-
-    pub fn get(&self, index: i64) -> i64 {
-        unsafe {
-            let args: [sys::GDExtensionConstTypePtr; 1] =
-                [&index as *const i64 as sys::GDExtensionConstTypePtr];
-            call_builtin(
-                Self::VARIANT_TYPE,
-                "get",
-                4103005248,
-                self.as_ptr() as sys::GDExtensionTypePtr,
-                &args,
-            )
-        }
-    }
-}
-
-// `()` is the return type of builtin methods that return nothing.
-unsafe impl crate::ptrcall::PtrcallRet for () {
-    unsafe fn from_ptrcall<F>(call: F) -> Self
-    where
-        F: FnOnce(sys::GDExtensionTypePtr),
-    {
-        call(std::ptr::null_mut());
+        self.push_back(value);
     }
 }
 

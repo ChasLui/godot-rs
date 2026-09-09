@@ -135,12 +135,12 @@ for cmd in "${cmds[@]}"; do
     echo "> $cmd"
     $cmd || {
         printf "$RED\n=========================="
-        printf "\ngodot-rust checker FAILED."
+        printf "\ngodot-rs checker FAILED."
         printf "\n==========================\n$END"
         exit 1
     }
 done
 
 printf "$GREEN\n=============================="
-printf "\ngodot-rust checker SUCCESSFUL."
+printf "\ngodot-rs checker SUCCESSFUL."
 printf "\n==============================\n$END"

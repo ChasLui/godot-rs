@@ -122,6 +122,7 @@ dependencies = [
 name = "godot-core"
 version = "0.1.0"
 dependencies = [
+ "godot-codegen",
  "godot-sys",
 ]
 

@@ -90,7 +90,7 @@ impl Counter {
                 };
                 let _ = classes::Object::call(
                     &obj,
-                    StringName::new("_advance_by"),
+                    &StringName::new("_advance_by"),
                     &[step.to_variant()],
                 );
             }
@@ -118,7 +118,7 @@ impl Counter {
         };
         let _ = classes::Object::emit_signal(
             &this,
-            StringName::new("value_changed"),
+            &StringName::new("value_changed"),
             &[self.value.to_variant()],
         );
     }

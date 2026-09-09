@@ -66,6 +66,17 @@ macro_rules! impl_ptrcall_direct {
 impl_ptrcall_direct!(bool, i8, i16, i32, i64, u8, u16, u32, u64, f32, f64);
 impl_ptrcall_direct!(GString, StringName, Variant);
 
+/// Methods that return nothing still go through the same path; the engine is handed a null
+/// return slot.
+unsafe impl PtrcallRet for () {
+    unsafe fn from_ptrcall<F>(call: F) -> Self
+    where
+        F: FnOnce(sys::GDExtensionTypePtr),
+    {
+        call(std::ptr::null_mut());
+    }
+}
+
 // `Gd<T>` is transparent over the object pointer, which is exactly what ptrcall passes and
 // returns. A null pointer means "no object", hence the `Option`.
 unsafe impl<T: GodotObject> PtrcallArg for Gd<T> {}

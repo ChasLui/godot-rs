@@ -9,7 +9,8 @@ assignees: jacobsky
 
 <!-- 
 Question issues are for questions about how to use the library, but also design and API related questions.
-Make sure you have read the relevant parts of the book, especially the FAQ: https://godot-rust.github.io/book/faq.html
+Please check the README first, especially the Scope section, which lists what is and is
+not implemented: https://github.com/ChasLui/godot-rs#scope
 
 Instead of an issue, also consider joining our Discord server for more interactive discussion!
 You can follow this invite link: https://discord.gg/FNudpBD

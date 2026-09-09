@@ -5,8 +5,8 @@
 //! path a real user's code takes.
 
 use godot::builtin::{
-    Color, Dictionary, NodePath, PackedByteArray, PackedStringArray, Transform2D, TypedArray,
-    VariantArray, Vector3,
+    Color, Dictionary, NodePath, PackedByteArray, PackedFloat32Array, PackedStringArray,
+    Transform2D, TypedArray, VariantArray, Vector2, Vector3,
 };
 use godot::classes;
 use godot::prelude::*;
@@ -160,7 +160,7 @@ impl RustTestNode {
 
         match classes::Object::emit_signal(
             &this,
-            StringName::new("counter_changed"),
+            &StringName::new("counter_changed"),
             &[self.counter.to_variant()],
         ) {
             Ok(result) => match i64::try_from_variant(&result) {
@@ -293,7 +293,7 @@ impl RustTestNode {
             return StringName::new("");
         };
 
-        classes::Node::set_name(&node, name);
+        classes::Node::set_name(&node, &name);
         let read_back = classes::Node::get_name(&node);
 
         // Node is manually managed, so it must be freed explicitly.
@@ -366,7 +366,7 @@ impl RustTestNode {
     fn dictionary_lookup(&mut self, d: Dictionary, key: GString) -> Variant {
         let key = key.to_variant();
         if d.has(&key) {
-            d.get_or(&key, &Variant::nil())
+            d.get(&key, &Variant::nil())
         } else {
             (-1i64).to_variant()
         }
@@ -399,6 +399,33 @@ impl RustTestNode {
     #[func]
     fn node_path_roundtrip(&mut self, path: GString) -> NodePath {
         NodePath::from_path(&path.to_rust_string())
+    }
+
+    /// Exercises methods that are now generated rather than hand-written, across the three
+    /// shapes they come in: const with args, mutating, and one returning a builtin.
+    #[func]
+    fn generated_builtin_methods(&mut self) -> GString {
+        // String: const method with an argument.
+        let haystack = GString::new("hello world");
+        let idx = haystack.find(&GString::new("world"), 0);
+
+        // Packed array: a mutating method, then a const one, on a type that previously had no
+        // accessors at all.
+        let mut floats = PackedFloat32Array::new();
+        floats.push_back(1.5);
+        floats.push_back(2.5);
+        let float_sum = floats.get(0) + floats.get(1);
+
+        // Vector2: a generated method returning a builtin, alongside the hand-written maths
+        // that was deliberately kept in Rust.
+        let v = Vector2::new(3.0, 4.0);
+        let clamped = v.clamp(Vector2::ZERO, Vector2::new(2.0, 2.0));
+        let hand_written_length = v.length();
+
+        GString::new(&format!(
+            "{idx},{float_sum},{},{},{hand_written_length}",
+            clamped.x, clamped.y
+        ))
     }
 
     /// Builds a typed array in Rust. GDScript checks that the engine really considers it typed,
@@ -493,7 +520,7 @@ impl RustTestNode {
         let Some(node) = Gd::<classes::Node>::new() else {
             return false;
         };
-        classes::Node::set_name(&node, StringName::new("Probe"));
+        classes::Node::set_name(&node, &StringName::new("Probe"));
         unsafe { node.free() };
         true
     }
