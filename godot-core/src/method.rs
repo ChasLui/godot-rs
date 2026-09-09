@@ -16,6 +16,8 @@ pub struct MethodDecl<T> {
 struct MethodUserdata<T> {
     func: fn(&mut T, &[Variant]) -> Variant,
     arg_count: u32,
+    /// Kept for the panic message, which the engine's backtrace cannot supply.
+    name: &'static str,
 }
 
 /// Godot's dynamic ("varcall") entry point for an exported method.
@@ -52,7 +54,11 @@ unsafe extern "C" fn method_call<T: GodotClass>(
     }
 
     let this = &mut *(instance as *mut T);
-    let result = (userdata.func)(this, &owned_args);
+    let result = crate::panics::catch(
+        &format!("{}::{}", T::CLASS_NAME, userdata.name),
+        Variant::nil(),
+        || (userdata.func)(this, &owned_args),
+    );
 
     result.move_into(r_return);
     (*r_error).error = sys::GDExtensionCallErrorType_GDEXTENSION_CALL_OK;
@@ -104,6 +110,7 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     let userdata = Box::into_raw(Box::new(MethodUserdata::<T> {
         func: decl.func,
         arg_count: decl.arg_count,
+        name: decl.name,
     }));
 
     let mut return_strings = PropertyStrings::new("ret");

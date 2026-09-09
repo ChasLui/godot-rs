@@ -115,6 +115,7 @@ struct RustTestNode {
     input_events: i64,
     notifications: Vec<i32>,
     dynamic_sink: i64,
+    panic_in_virtual: bool,
     ready_calls: i64,
     process_calls: i64,
     physics_calls: i64,
@@ -136,6 +137,7 @@ impl RustTestNode {
             input_events: 0,
             notifications: Vec::new(),
             dynamic_sink: 0,
+            panic_in_virtual: false,
             ready_calls: 0,
             process_calls: 0,
             physics_calls: 0,
@@ -324,6 +326,28 @@ impl RustTestNode {
     #[func]
     fn add_one(&mut self, value: i64) -> i64 {
         value + 1
+    }
+
+    /// Panics on purpose. Unwinding out of an `extern "C"` callback is undefined behaviour and
+    /// aborts in practice, so the boundary catches it: the engine reports the panic and keeps
+    /// running instead of taking the editor down with unsaved work.
+    #[func]
+    fn panicking_method(&mut self) -> i64 {
+        let empty: Vec<i64> = Vec::new();
+        empty[5]
+    }
+
+    /// The same, from a virtual method, which dispatches through a different boundary.
+    #[godot_virtual]
+    fn unhandled_key_input(&mut self, _event: Option<Gd<classes::InputEvent>>) {
+        if self.panic_in_virtual {
+            panic!("deliberate panic from a virtual method");
+        }
+    }
+
+    #[func]
+    fn arm_virtual_panic(&mut self) {
+        self.panic_in_virtual = true;
     }
 
     /// Proves per-instance state actually lives across calls.

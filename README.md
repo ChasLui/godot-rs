@@ -173,6 +173,9 @@ Built and covered by the integration tests:
   than a bare integer
 - Default arguments: a method with defaults gets a short form taking only the required
   arguments, plus an `_ex` form taking all of them
+- Panics in user code are caught at the FFI boundary and reported through Godot's error output.
+  Unwinding out of an `extern "C"` callback is undefined behaviour and aborts in practice, which
+  would take the editor down with any unsaved work.
 - Frame-driven `async` (`godot-async`)
 - Hot reload: swapping the library in the editor rebuilds each instance's Rust state while the
   engine object survives. Needs `reloadable = true` in the `.gdextension`; the engine only

@@ -106,7 +106,7 @@ unsafe extern "C" fn closure_call(
         owned.push(Variant::from_sys_copy(*args.add(i)));
     }
 
-    let result = closure(&owned);
+    let result = crate::panics::catch("a closure callable", Variant::nil(), || closure(&owned));
     result.move_into(ret);
 
     if !error.is_null() {

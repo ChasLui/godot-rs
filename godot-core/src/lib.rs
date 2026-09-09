@@ -22,6 +22,7 @@ pub(crate) mod property_flags {
 
 pub mod method;
 pub mod obj;
+pub mod panics;
 pub mod ptrcall;
 pub mod registry;
 pub mod signal;

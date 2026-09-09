@@ -13,6 +13,7 @@ var failures: Array[String] = []
 var completed: Array[String] = []
 const EXPECTED_TESTS := [
 	"class_registration", "variant_roundtrip", "engine_calls", "object_lifecycle",
+	"panic_is_contained",
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
 ]
@@ -35,6 +36,7 @@ func _ready() -> void:
 	test_signals()
 	test_rust_side_connect()
 	test_init_levels()
+	test_panic_is_contained()
 	test_math_builtins()
 	test_collections()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
@@ -303,6 +305,23 @@ func test_init_levels() -> void:
 	if n != null:
 		n.free()
 	done("init_levels")
+
+func test_panic_is_contained() -> void:
+	# A panic inside a #[func] must be reported and contained. If it escaped the FFI boundary
+	# the process would abort, and none of the checks after this point would run at all -- so
+	# reaching them is itself part of the assertion.
+	var victim: Object = ClassDB.instantiate("RustTestNode")
+
+	var result = victim.panicking_method()
+	check(result == null,
+		"a panicking method should yield null, got %s" % [result])
+
+	# The instance must still be usable: catching is only worth doing if the object survives.
+	check(victim.echo_int(7) == 7, "the object was unusable after a panic")
+	check(victim.bump() == 1, "instance state was lost after a panic")
+
+	victim.free()
+	done("panic_is_contained")
 
 func test_math_builtins() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
