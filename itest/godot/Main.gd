@@ -13,7 +13,7 @@ var failures: Array[String] = []
 var completed: Array[String] = []
 const EXPECTED_TESTS := [
 	"class_registration", "variant_roundtrip", "engine_calls", "object_lifecycle",
-	"panic_is_contained",
+	"panic_is_contained", "previously_untested_apis",
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
 ]
@@ -37,6 +37,7 @@ func _ready() -> void:
 	test_rust_side_connect()
 	test_init_levels()
 	test_panic_is_contained()
+	test_previously_untested_apis()
 	test_math_builtins()
 	test_collections()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
@@ -125,6 +126,12 @@ func test_virtuals() -> void:
 		"_to_string returned %s" % str(virtual_node))
 
 	await test_async()
+
+	# The `frames` helper, which nothing exercised.
+	virtual_node.spawn_frame_waiter(3)
+	check(not virtual_node.frame_waiter_done(), "frames() finished before any frame passed")
+	await get_tree().create_timer(0.25).timeout
+	check(virtual_node.frame_waiter_done(), "frames() never finished")
 
 	# Removing from the tree must fire _exit_tree, proving the counter tracks real events.
 	remove_child(virtual_node)
@@ -323,6 +330,29 @@ func test_panic_is_contained() -> void:
 	victim.free()
 	done("panic_is_contained")
 
+func test_previously_untested_apis() -> void:
+	# These were implemented but never exercised: found by listing public names that no test
+	# or example mentioned.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+
+	# try_cast must succeed for a real base, fail for an unrelated class, and upcast_unchecked
+	# must not change what the engine thinks the object is.
+	check(n.cast_behaviour() == "true,true,Sprite2D",
+		"cast behaviour was %s, expected true,true,Sprite2D" % n.cast_behaviour())
+
+	# A Signal built from an object and a name must report both back.
+	check(n.signal_object_and_name() == "counter_changed,true",
+		"signal object/name was %s" % n.signal_object_and_name())
+
+	# An untyped view shares the container: 2 elements, then 3 after appending through it.
+	check(n.typed_array_untyped_view() == "true,3,3",
+		"typed/untyped view gave %s, expected true,3,3" % n.typed_array_untyped_view())
+
+	check(n.variant_nil_check(42), "Variant::is_nil disagreed about nil and non-nil")
+
+	n.free()
+	done("previously_untested_apis")
+
 func test_math_builtins() -> void:
 	var n: Object = ClassDB.instantiate("RustTestNode")
 
@@ -381,7 +411,9 @@ func test_collections() -> void:
 		"default argument substitution: got %d, expected 1 (short=0, full=1)"
 			% n.default_arguments_match())
 
-	# The raw-pointer methods: the call path works and returns what the engine documents.
+	# The raw-pointer methods. This deliberately asks the engine to load a path that does not
+	# exist, so the two errors it prints here are the expected result, not a failure.
+	print("  (the next two engine errors are expected: a deliberate bad extension path)")
 	# load_extension_from_function rejects a null entry function; transform_from_pose bails out
 	# with a default transform when no OpenXR runtime exists, which is the case here -- so this
 	# covers the signature and marshalling, not the fate of the pointed-to bytes.

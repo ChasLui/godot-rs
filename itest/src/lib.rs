@@ -6,7 +6,7 @@
 
 use godot::builtin::{
     Callable, Color, Dictionary, NodePath, PackedByteArray, PackedFloat32Array, PackedStringArray,
-    Transform2D, TypedArray, VariantArray, Vector2, Vector3,
+    Signal, Transform2D, TypedArray, VariantArray, Vector2, Vector3,
 };
 use godot::classes;
 use godot::global;
@@ -25,6 +25,9 @@ impl Drop for DropGuard {
 thread_local! {
     /// How many `DropGuard`s have been dropped.
     static DROPPED: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+
+    /// Whether the `frames()` waiter finished.
+    static FRAMES_DONE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 
     /// Progress of the spawned test future. Thread-local because the runtime is single-threaded,
     /// matching Godot's own calling convention.
@@ -348,6 +351,88 @@ impl RustTestNode {
     #[func]
     fn arm_virtual_panic(&mut self) {
         self.panic_in_virtual = true;
+    }
+
+    /// Exercises the object-model APIs that had no coverage: a cast that should succeed, one
+    /// that should not, and an upcast.
+    ///
+    /// Returns `"ok_cast,bad_cast,upcast_class"`.
+    #[func]
+    fn cast_behaviour(&mut self) -> GString {
+        let Some(sprite) = Gd::<classes::Sprite2D>::new() else {
+            return GString::new("<none>");
+        };
+
+        // Sprite2D is a Node2D, so this must succeed and address the same object.
+        let ok_cast = match sprite.try_cast::<classes::Node2D>() {
+            Some(as_node2d) => as_node2d.instance_id() == sprite.instance_id(),
+            None => false,
+        };
+
+        // It is not a Camera3D, so this must fail rather than hand back a bogus handle.
+        let bad_cast = sprite.try_cast::<classes::Camera3D>().is_none();
+
+        // An unchecked upcast keeps the object; the engine still reports its real class.
+        let cloned = sprite.clone();
+        let as_object = unsafe { cloned.upcast_unchecked::<classes::Object>() };
+        let upcast_class = as_object.get_class().to_rust_string();
+
+        unsafe { sprite.free() };
+        GString::new(&format!("{ok_cast},{bad_cast},{upcast_class}"))
+    }
+
+    /// Builds a `Signal` from an object and a name, and checks the engine agrees about both.
+    #[func]
+    fn signal_object_and_name(&mut self) -> GString {
+        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
+            return GString::new("<none>");
+        };
+
+        let signal = Signal::from_object_signal(&this, &StringName::new("counter_changed"));
+        let name = signal.get_name().to_rust_string();
+        // Signal::get_object_id is declared signed in the API while Gd::instance_id follows
+        // GDObjectInstanceID, which is unsigned; the value is the same either way.
+        let same_object = signal.get_object_id() as u64 == this.instance_id();
+
+        GString::new(&format!("{name},{same_object}"))
+    }
+
+    /// A typed array viewed as an untyped one shares the container rather than copying it.
+    #[func]
+    fn typed_array_untyped_view(&mut self) -> GString {
+        let mut typed = TypedArray::<i64>::new();
+        typed.push(&5);
+        typed.push(&6);
+
+        let untyped = typed.to_untyped();
+        let same_len = untyped.len() == typed.len();
+
+        // Reference semantics: appending through the untyped view is visible in the typed one.
+        let mut untyped2 = typed.to_untyped();
+        untyped2.push(&7i64.to_variant());
+
+        GString::new(&format!("{same_len},{},{}", untyped.len(), typed.len()))
+    }
+
+    /// `Variant::is_nil`, which nothing exercised.
+    #[func]
+    fn variant_nil_check(&mut self, value: Variant) -> bool {
+        Variant::nil().is_nil() && !value.is_nil()
+    }
+
+    /// Waits a fixed number of frames using the `frames` helper, then records completion.
+    #[func]
+    fn spawn_frame_waiter(&mut self, count: i64) {
+        FRAMES_DONE.with(|d| d.set(false));
+        AsyncRuntime::spawn(async move {
+            frames(count as u32).await;
+            FRAMES_DONE.with(|d| d.set(true));
+        });
+    }
+
+    #[func]
+    fn frame_waiter_done(&mut self) -> bool {
+        FRAMES_DONE.with(|d| d.get())
     }
 
     // -- Benchmarks ---------------------------------------------------------------------
