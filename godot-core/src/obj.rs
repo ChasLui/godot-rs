@@ -334,6 +334,19 @@ impl<T: GodotObject> crate::builtin::FromGodot for Gd<T> {
                 sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_OBJECT,
                 &mut ptr as *mut sys::GDExtensionObjectPtr as sys::GDExtensionTypePtr,
             );
+            if ptr.is_null() {
+                return None;
+            }
+
+            // A Variant records that it holds *an* object, never which class, so the class has
+            // to be checked here or any object at all would satisfy any `Gd<T>` -- and the
+            // methods then called on it would belong to a different type.
+            let name = crate::builtin::StringName::new(T::CLASS_NAME);
+            let tag = sys::interface_fn!(classdb_get_class_tag)(name.as_ptr());
+            if tag.is_null() {
+                return None;
+            }
+            let ptr = sys::interface_fn!(object_cast_to)(ptr, tag);
 
             let gd = Self::from_obj_ptr(ptr)?;
 

@@ -1,6 +1,7 @@
 use crate::builtin::{GString, StringName};
 use crate::property_flags::PROPERTY_USAGE_DEFAULT;
 use godot_sys as sys;
+use std::mem::MaybeUninit;
 
 /// A Rust type that is registered with Godot's ClassDB as a native class.
 ///
@@ -533,6 +534,57 @@ pub unsafe fn unregister_class<T: GodotClass>() {
 
     let class_name = StringName::new(T::CLASS_NAME);
     sys::interface_fn!(classdb_unregister_extension_class)(sys::library(), class_name.as_ptr());
+}
+
+/// Recovers a class's Rust state from an engine handle to it.
+///
+/// A `#[godot_api]` type is the state behind an engine object, and `Gd` names the object, not
+/// the state. So a method receiving `Gd<Node>` could reach the Rust fields of the class behind
+/// it only by going back out through the engine and calling a `#[func]`. This is the direct
+/// route.
+///
+/// `Gd<T>` cannot be used for a user class instead: `Deref` puts the target at the handle's own
+/// address, which is only sound for the zero-sized markers the engine classes use. A class with
+/// fields would be read out of the pointer itself.
+///
+/// Answers `None` if the object is not a `T`. The engine decides that, via the same class tag
+/// `try_cast` uses -- the instance binding alone cannot be trusted, since every object has one.
+///
+/// # Safety
+/// The returned reference borrows state the engine also hands to virtual calls and `#[func]`
+/// methods on the same object. Do not hold it across a call that could re-enter the object.
+pub unsafe fn rust_instance<T, Base>(obj: &crate::obj::Gd<Base>) -> Option<&'static mut T>
+where
+    T: GodotClass,
+    Base: crate::obj::GodotObject,
+{
+    // The class is compared by name, not with `object_cast_to`. A class tag identifies a C++
+    // type, and an extension class has none of its own -- ClassDB hands back the tag of the
+    // engine base it was registered under, so every class in this extension deriving from Node
+    // casts to every other one. `object_get_class_name` answers with the actual class.
+    let mut actual = MaybeUninit::<StringName>::uninit();
+    let ok = sys::interface_fn!(object_get_class_name)(
+        obj.as_obj_ptr(),
+        sys::library(),
+        actual.as_mut_ptr() as sys::GDExtensionUninitializedStringNamePtr,
+    );
+    if ok == 0 {
+        return None;
+    }
+    if actual.assume_init().to_rust_string() != T::CLASS_NAME {
+        return None;
+    }
+
+    let binding = sys::interface_fn!(object_get_instance_binding)(
+        obj.as_obj_ptr(),
+        sys::library(),
+        &BINDING_CALLBACKS as *const _,
+    );
+    if binding.is_null() {
+        return None;
+    }
+
+    Some(&mut *(binding as *mut T))
 }
 
 /// Class names this extension has registered, so a class can be told from an engine one.

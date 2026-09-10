@@ -214,6 +214,27 @@ func test_virtuals() -> void:
 		"an optional object argument did not behave as null, got %s"
 			% virtual_node.optional_object_argument())
 
+	# One Rust object reaching another's state directly, rather than calling back through
+	# the engine. The engine decides the type, so a mismatched class must be refused.
+	var peer: Object = ClassDB.instantiate("RustTestNode")
+	peer.bump()
+	peer.bump()
+	check(virtual_node.read_other_rust_state(peer) == 2,
+		"reading another Rust object's state gave %s, expected 2"
+			% virtual_node.read_other_rust_state(peer))
+	check(virtual_node.read_wrong_rust_state(peer) == 0,
+		"a mismatched class was not refused")
+
+	# A Variant records that it holds an object, not which class. Converting one back into a
+	# Gd<Node2D> must check: a Label is a Node but not a Node2D.
+	var label: Object = ClassDB.instantiate("Label")
+	var accepted := false
+	if virtual_node.has_method("takes_node2d"):
+		accepted = virtual_node.callv("takes_node2d", [label]) == 1
+	check(not accepted, "a Label was accepted where a Node2D was required")
+	label.free()
+	peer.free()
+
 	# An instance id outlives the object it names, which is what makes it safe to store where
 	# a Gd would dangle. 1 = live lookup found it, 2 = the class is checked, 4 = the lookup
 	# after free came back empty.

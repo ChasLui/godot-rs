@@ -771,6 +771,40 @@ impl RustTestNode {
         count
     }
 
+    /// Reaches another Rust object's state directly, without going back through the engine.
+    ///
+    /// `Gd` names an engine object; the Rust fields behind it are reached with
+    /// `rust_instance`. Returns the other node's counter, or a negative code, so a wrong
+    /// answer is distinguishable from a refusal.
+    #[func]
+    fn read_other_rust_state(&mut self, other: Gd<classes::Node>) -> i64 {
+        // SAFETY: the reference is used and dropped here, with nothing in between that could
+        // re-enter the object.
+        match unsafe { godot::registry::rust_instance::<RustTestNode, _>(&other) } {
+            Some(state) => state.counter,
+            None => -2,
+        }
+    }
+
+    /// Takes a `Gd` of a specific class. A Variant records only that it holds *an* object, so
+    /// the class has to be checked when it is converted back -- otherwise any object at all
+    /// satisfies any `Gd<T>`, and the methods called on it belong to a different type.
+    #[func]
+    fn takes_node2d(&mut self, node: Gd<classes::Node2D>) -> i64 {
+        let _ = node;
+        1
+    }
+
+    /// The same call against an object that is not a `RustTestNode`, which must be refused
+    /// rather than reinterpreting whatever state that object has.
+    #[func]
+    fn read_wrong_rust_state(&mut self, other: Gd<classes::Node>) -> i64 {
+        match unsafe { godot::registry::rust_instance::<RustRuntimeOnlyNode, _>(&other) } {
+            Some(_) => -3,
+            None => 0,
+        }
+    }
+
     /// Whether an object id outlives the object it names.
     ///
     /// A `Gd` to a manually-managed object dangles the moment someone frees it, and nothing can
