@@ -331,8 +331,9 @@ impl RustTestNode {
     #[signal]
     fn target_changed(node: Gd<classes::Node>, label: GString) {}
 
-    /// A float property, backed by the accessor pair below.
-    #[prop(set = set_speed)]
+    /// A float property, backed by the accessor pair below. The hint is what makes the
+    /// inspector draw a slider instead of a spin box -- GDScript spells it `@export_range`.
+    #[prop(set = set_speed, hint = PROPERTY_HINT_RANGE, hint_string = "0,100,0.5")]
     fn get_speed(&mut self) -> f64 {
         self.speed
     }

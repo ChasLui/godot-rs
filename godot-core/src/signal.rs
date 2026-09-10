@@ -95,10 +95,13 @@ pub unsafe fn register_signal<T: GodotClass>(name: &str, args: &[SignalArg]) {
 ///
 /// # Safety
 /// `T` must already be registered, along with both accessor methods.
+#[allow(clippy::too_many_arguments)]
 pub unsafe fn register_property<T: GodotClass>(
     name: &str,
     variant_type: sys::GDExtensionVariantType,
     property_class: &str,
+    hint: u32,
+    hint_string: &str,
     setter: &str,
     getter: &str,
 ) {
@@ -110,7 +113,11 @@ pub unsafe fn register_property<T: GodotClass>(
     // For an object property this names the class the value must be. Empty for everything else,
     // where the Variant type says all there is to say.
     strings.class_name = StringName::new(property_class);
-    let info = strings.info(variant_type);
+    // The hint is what the inspector draws with: a number with PROPERTY_HINT_RANGE and "0,100"
+    // is a slider rather than a spin box, a string with PROPERTY_HINT_FILE is a file picker.
+    strings.hint_string = GString::new(hint_string);
+    let mut info = strings.info(variant_type);
+    info.hint = hint;
 
     sys::interface_fn!(classdb_register_extension_class_property)(
         sys::library(),

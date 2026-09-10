@@ -225,6 +225,38 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# A property hint: without it the inspector draws a plain spin box, with it a slider
+	# bounded by the hint string. The value round trip cannot see the difference, so the
+	# declaration is what gets checked.
+	var speed_hint := -1
+	var speed_hint_string := ""
+	for p in virtual_node.get_property_list():
+		if p.name == "speed":
+			speed_hint = p.hint
+			speed_hint_string = p.hint_string
+	# Compared against GDScript's own @export_range, declared the same way in HintControl.gd:
+	# the two must be indistinguishable from the engine's side.
+	var control_script: GDScript = load("res://HintControl.gd")
+	var control_obj: Object = control_script.new()
+	var control_hint := -1
+	var control_hint_string := ""
+	for p in control_obj.get_property_list():
+		if p.name == "ranged":
+			control_hint = p.hint
+			control_hint_string = p.hint_string
+	control_obj.free()
+	# The hint must match; the hint string need not be spelled identically -- GDScript's
+	# compiler normalises 0 to 0.0, and the engine takes either.
+	check(speed_hint == control_hint,
+		"a Rust ranged property declares hint %s where GDScript declares %s"
+			% [speed_hint, control_hint])
+	check(not control_hint_string.is_empty(),
+		"the GDScript control lost its hint string, so the comparison proves nothing")
+	check(speed_hint == PROPERTY_HINT_RANGE,
+		"the ranged property declares hint %s, expected PROPERTY_HINT_RANGE" % speed_hint)
+	check(speed_hint_string == "0,100,0.5",
+		"the range hint string is %s" % speed_hint_string)
+
 	# A signal's arguments carry their declared types, not just names: an untyped argument is
 	# a Variant, which tells the editor and GDScript nothing.
 	var signal_args: Array = []

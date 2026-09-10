@@ -193,7 +193,9 @@ Built and covered by the integration tests:
 - Class registration, instantiation from GDScript and the editor
 - Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). Properties and signal
   arguments may be any builtin type or an object, and an object declares its class, so the
-  inspector shows a typed slot and the connection dialog shows the signal's real shape
+  inspector shows a typed slot and the connection dialog shows the signal's real shape. A
+  property may carry a hint -- `#[prop(set = ..., hint = PROPERTY_HINT_RANGE, hint_string =
+  "0,100")]` is GDScript's `@export_range(0, 100)`
 - Any engine virtual can be overridden -- `_ready`, `_process`, `_input`, `_enter_tree`,
   `_to_string`, `_notification`, `_get`/`_set`/`_get_property_list`, ... -- by declaring a
   `#[godot_virtual]` method

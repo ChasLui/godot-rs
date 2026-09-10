@@ -1,6 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 use syn::parse::Parser as _;
+use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType};
 
@@ -72,8 +73,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 _ => virtuals.push(parse_virtual(method)?),
             }
         }
-        if let Some(setter) = prop_setter {
-            properties.push(parse_property(method, setter)?);
+        if let Some(prop) = prop_setter {
+            properties.push(parse_property(method, prop)?);
         }
     }
 
@@ -109,6 +110,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         let setter = &p.setter;
         let getter = &p.getter;
         let variant_type = &p.variant_type;
+        let hint = &p.hint;
+        let hint_string = &p.hint_string;
         quote! {
             {
                 let (__godot_type, __godot_class) = #variant_type;
@@ -116,6 +119,8 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     #name,
                     __godot_type,
                     __godot_class,
+                    #hint,
+                    #hint_string,
                     #setter,
                     #getter,
                 );
@@ -320,8 +325,7 @@ fn parse_attr(attr: TokenStream) -> syn::Result<(syn::Ident, bool)> {
         ));
     }
 
-    let args =
-        syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
+    let args = Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated.parse2(attr)?;
 
     let mut base = None;
     let mut runtime = false;
@@ -616,43 +620,118 @@ fn parse_signal(method: &ImplItemFn) -> syn::Result<(String, Vec<(String, TokenS
 
 struct Property {
     name: String,
+    hint: TokenStream,
+    hint_string: String,
     getter: String,
     setter: String,
     variant_type: TokenStream,
 }
 
-/// Reads `#[prop(set = set_speed)]` off a getter, returning the setter name.
-fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<String>> {
+/// What `#[prop(...)]` said.
+pub(crate) struct PropAttr {
+    pub setter: String,
+    /// A `PropertyHint` constant name such as `PROPERTY_HINT_RANGE`, or none.
+    pub hint: Option<String>,
+    pub hint_string: String,
+}
+
+/// Reads `#[prop(set = set_speed)]`, optionally with `hint` and `hint_string`, off a getter.
+///
+/// The hint is what turns a bare number field into a slider and a string field into a file
+/// picker: `#[prop(set = set_speed, hint = PROPERTY_HINT_RANGE, hint_string = "0,100")]` is
+/// GDScript's `@export_range(0, 100)`.
+fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
     let Some(pos) = method.attrs.iter().position(|a| a.path().is_ident("prop")) else {
         return Ok(None);
     };
 
     let attr = method.attrs.remove(pos);
-    let meta: syn::MetaNameValue = attr.parse_args()?;
+    let entries =
+        attr.parse_args_with(Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated)?;
 
-    if !meta.path.is_ident("set") {
+    let mut setter = None;
+    let mut hint = None;
+    let mut hint_string = String::new();
+
+    for entry in entries {
+        if entry.path.is_ident("set") {
+            let syn::Expr::Path(p) = &entry.value else {
+                return Err(syn::Error::new(
+                    entry.value.span(),
+                    "setter must be a method name",
+                ));
+            };
+            setter = Some(
+                p.path
+                    .get_ident()
+                    .ok_or_else(|| syn::Error::new(p.span(), "setter must be a method name"))?
+                    .to_string(),
+            );
+        } else if entry.path.is_ident("hint") {
+            let syn::Expr::Path(p) = &entry.value else {
+                return Err(syn::Error::new(
+                    entry.value.span(),
+                    "hint must be a PropertyHint constant, e.g. PROPERTY_HINT_RANGE",
+                ));
+            };
+            hint = Some(
+                p.path
+                    .get_ident()
+                    .ok_or_else(|| {
+                        syn::Error::new(p.span(), "hint must be a PropertyHint constant name")
+                    })?
+                    .to_string(),
+            );
+        } else if entry.path.is_ident("hint_string") {
+            let syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(text),
+                ..
+            }) = &entry.value
+            else {
+                return Err(syn::Error::new(
+                    entry.value.span(),
+                    "hint_string must be a string literal",
+                ));
+            };
+            hint_string = text.value();
+        } else {
+            return Err(syn::Error::new(
+                entry.path.span(),
+                "expected `set`, `hint` or `hint_string`",
+            ));
+        }
+    }
+
+    let setter = setter.ok_or_else(|| {
+        syn::Error::new(attr.span(), "#[prop] needs a setter: #[prop(set = method)]")
+    })?;
+
+    if hint.is_none() && !hint_string.is_empty() {
         return Err(syn::Error::new(
-            meta.path.span(),
-            "expected #[prop(set = setter_method_name)]",
+            attr.span(),
+            "hint_string has no effect without a hint",
         ));
     }
 
-    match meta.value {
-        syn::Expr::Path(p) => p
-            .path
-            .get_ident()
-            .map(|i| Some(i.to_string()))
-            .ok_or_else(|| syn::Error::new(p.span(), "setter must be a method name")),
-        other => Err(syn::Error::new(
-            other.span(),
-            "setter must be a method name",
-        )),
-    }
+    Ok(Some(PropAttr {
+        setter,
+        hint,
+        hint_string,
+    }))
 }
 
 /// Derives the property from its getter: `get_speed` returning `f64` becomes the `speed`
 /// property of Godot type FLOAT.
-fn parse_property(method: &ImplItemFn, setter: String) -> syn::Result<Property> {
+fn parse_property(method: &ImplItemFn, attr: PropAttr) -> syn::Result<Property> {
+    let setter = attr.setter;
+    let hint = match &attr.hint {
+        Some(name) => {
+            let ident = format_ident!("{}", name);
+            quote!(::godot::global::PropertyHint::#ident.0 as u32)
+        }
+        None => quote!(0u32),
+    };
+    let hint_string = attr.hint_string;
     let getter = method.sig.ident.to_string();
     let name = getter
         .strip_prefix("get_")
@@ -675,6 +754,8 @@ fn parse_property(method: &ImplItemFn, setter: String) -> syn::Result<Property> 
         name,
         getter,
         setter,
+        hint,
+        hint_string,
         variant_type: variant_type_of(ty)?,
     })
 }
