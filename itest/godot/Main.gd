@@ -225,6 +225,22 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# A signal's arguments carry their declared types, not just names: an untyped argument is
+	# a Variant, which tells the editor and GDScript nothing.
+	var signal_args: Array = []
+	for sig in virtual_node.get_signal_list():
+		if sig.name == "target_changed":
+			signal_args = sig.args
+	check(signal_args.size() == 2,
+		"the signal declares %s arguments, expected 2" % signal_args.size())
+	if signal_args.size() == 2:
+		check(signal_args[0].type == TYPE_OBJECT,
+			"the object argument is declared as type %s" % signal_args[0].type)
+		check(signal_args[0].class_name == "Node",
+			"the object argument declares class %s, expected Node" % signal_args[0].class_name)
+		check(signal_args[1].type == TYPE_STRING,
+			"the string argument is declared as type %s" % signal_args[1].type)
+
 	# Properties beyond numbers and strings. A Vector2 property is what a class exports most
 	# often, and an object property has to tell the engine which class it holds.
 	virtual_node.offset = Vector2(3, 4)

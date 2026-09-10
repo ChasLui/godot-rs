@@ -321,9 +321,15 @@ impl RustTestNode {
 
     // -- Signals and properties ---------------------------------------------------------
 
-    /// Declared, not implemented: the body is ignored, only name and argument names register.
+    /// Declared, not implemented: the body is ignored, only the name and the arguments' names
+    /// and types register.
     #[signal]
     fn counter_changed(new_value: i64) {}
+
+    /// A signal carrying an object, which is what Godot's own signals mostly do -- and the
+    /// argument declares its class, so the connection dialog and `get_signal_list` show it.
+    #[signal]
+    fn target_changed(node: Gd<classes::Node>, label: GString) {}
 
     /// A float property, backed by the accessor pair below.
     #[prop(set = set_speed)]

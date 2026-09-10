@@ -7,7 +7,7 @@ use syn::{FnArg, ImplItem, ImplItemFn, ItemImpl, ReturnType};
 pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> {
     let (base, is_runtime) = parse_attr(attr)?;
     let mut impl_block: ItemImpl = syn::parse2(item)?;
-    let mut signals: Vec<(String, Vec<String>)> = Vec::new();
+    let mut signals: Vec<(String, Vec<(String, TokenStream)>)> = Vec::new();
 
     let self_ty = &impl_block.self_ty;
     let class_name = type_name(self_ty)?;
@@ -125,7 +125,18 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
 
     let signal_registrations = signals.iter().map(|s| {
         let name = &s.0;
-        let args = &s.1;
+        let args = s.1.iter().map(|(arg_name, ty)| {
+            quote! {
+                {
+                    let (__godot_type, __godot_class) = #ty;
+                    ::godot::godot_core::signal::SignalArg {
+                        name: #arg_name,
+                        variant_type: __godot_type,
+                        class_name: __godot_class,
+                    }
+                }
+            }
+        });
         quote! {
             ::godot::godot_core::signal::register_signal::<Self>(#name, &[#(#args),*]);
         }
@@ -573,9 +584,10 @@ fn trampoline_for(v: &Virtual) -> TokenStream {
 
 /// `#[signal] fn damaged(amount: i64, source: GString) {}`
 ///
-/// The body is ignored; only the name and argument names are registered, since Godot's signal
-/// arguments are untyped Variants.
-fn parse_signal(method: &ImplItemFn) -> syn::Result<(String, Vec<String>)> {
+/// The body is ignored; the name, argument names and argument types are registered. Declaring
+/// the types is what lets the editor's connection dialog and `get_signal_list` show a signal's
+/// shape -- an argument left untyped is a Variant, which says nothing.
+fn parse_signal(method: &ImplItemFn) -> syn::Result<(String, Vec<(String, TokenStream)>)> {
     let name = method.sig.ident.to_string();
 
     let mut arg_names = Vec::new();
@@ -594,7 +606,7 @@ fn parse_signal(method: &ImplItemFn) -> syn::Result<(String, Vec<String>)> {
                         "#[signal] arguments must be plain names",
                     ));
                 };
-                arg_names.push(ident.ident.to_string());
+                arg_names.push((ident.ident.to_string(), variant_type_of(&pat.ty)?));
             }
         }
     }

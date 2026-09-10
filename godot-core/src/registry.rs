@@ -527,10 +527,17 @@ pub unsafe fn register_class<T: GodotClass>() {
 /// # Safety
 /// Only valid for a class previously registered with [`register_class`].
 pub unsafe fn unregister_class<T: GodotClass>() {
-    registered_classes()
+    // A class whose registration was refused was never in ClassDB, so unregistering it would
+    // draw an engine error for something the caller cannot be blamed for: `register_class` and
+    // `unregister_class` are written as a pair, and refusing one of them silently is friendlier
+    // than making every caller remember which registrations took.
+    let was_registered = registered_classes()
         .lock()
         .expect("registry lock poisoned")
         .remove(T::CLASS_NAME);
+    if !was_registered {
+        return;
+    }
 
     let class_name = StringName::new(T::CLASS_NAME);
     sys::interface_fn!(classdb_unregister_extension_class)(sys::library(), class_name.as_ptr());

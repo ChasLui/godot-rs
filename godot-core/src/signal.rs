@@ -42,18 +42,32 @@ impl PropertyStrings {
 ///
 /// # Safety
 /// `T` must already be registered.
-pub unsafe fn register_signal<T: GodotClass>(name: &str, arg_names: &[&str]) {
+pub unsafe fn register_signal<T: GodotClass>(name: &str, args: &[SignalArg]) {
     let class_name = StringName::new(T::CLASS_NAME);
     let signal_name = StringName::new(name);
 
-    let mut arg_strings: Vec<PropertyStrings> =
-        arg_names.iter().map(|n| PropertyStrings::new(n)).collect();
+    let mut arg_strings: Vec<PropertyStrings> = args
+        .iter()
+        .map(|a| {
+            let mut strings = PropertyStrings::new(a.name);
+            strings.class_name = StringName::new(a.class_name);
+            strings
+        })
+        .collect();
 
     let mut arg_infos: Vec<sys::GDExtensionPropertyInfo> = arg_strings
         .iter_mut()
-        .map(|s| {
-            let mut info = s.info(sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL);
-            info.usage = PROPERTY_USAGE_NIL_IS_VARIANT | PROPERTY_USAGE_DEFAULT;
+        .zip(args)
+        .map(|(s, arg)| {
+            let mut info = s.info(arg.variant_type);
+            // NIL means two different things in a property info: "no value" and "any value".
+            // The flag picks the second, and only an argument declared `Variant` wants it.
+            info.usage =
+                if arg.variant_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
+                    PROPERTY_USAGE_NIL_IS_VARIANT | PROPERTY_USAGE_DEFAULT
+                } else {
+                    PROPERTY_USAGE_DEFAULT
+                };
             info
         })
         .collect();
@@ -110,3 +124,11 @@ pub unsafe fn register_property<T: GodotClass>(
 pub(crate) use crate::property_flags::{
     PROPERTY_HINT_NONE, PROPERTY_USAGE_DEFAULT, PROPERTY_USAGE_NIL_IS_VARIANT,
 };
+
+/// One argument of a `#[signal]` declaration.
+pub struct SignalArg {
+    pub name: &'static str,
+    pub variant_type: sys::GDExtensionVariantType,
+    /// For an object argument, the class it holds; empty otherwise.
+    pub class_name: &'static str,
+}
