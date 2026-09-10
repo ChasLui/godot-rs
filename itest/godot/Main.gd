@@ -128,6 +128,50 @@ func test_refcounted_class() -> void:
 	check(not ClassDB.class_exists("RustDerivedResource"),
 		"a class inheriting another Rust class was registered, which is undefined behaviour")
 
+	# The point of a custom Resource is that it can be saved and loaded again. That needs the
+	# class's fields to be registered properties, not just methods.
+	var to_save: Object = ClassDB.instantiate("RustTestResource")
+	to_save.set_payload(99)
+	var path := "user://rust_resource_roundtrip.tres"
+	var save_err := ResourceSaver.save(to_save, path)
+	check(save_err == OK, "saving a Rust Resource failed with %s" % save_err)
+	to_save = null
+
+	var loaded: Object = ResourceLoader.load(path, "", ResourceLoader.CACHE_MODE_IGNORE)
+	check(loaded != null, "a saved Rust Resource could not be loaded back")
+	if loaded != null:
+		check(loaded.get_class() == "RustTestResource",
+			"the loaded resource is a %s" % loaded.get_class())
+		check(loaded.payload() == 99,
+			"the Rust Resource did not survive a save/load round trip: payload is %s"
+				% loaded.payload())
+		loaded = null
+
+	# A GDScript script extending a Rust class. The object then carries both a script instance
+	# and an extension instance; Rust methods and script methods must both still work.
+	var script: GDScript = load("res://DerivedInGDScript.gd")
+	check(script != null, "could not load a script extending a Rust class")
+	if script != null:
+		var obj: Object = script.new()
+		check(obj != null, "could not instantiate a GDScript class extending a Rust class")
+		if obj != null:
+			check(obj.bump_script_side() == 1, "the script half of the object did not work")
+			# The Rust half keeps its own per-instance state, reached through the script object.
+			# Each call is bound first: bump() counts, so calling it inside a message would
+			# advance the very thing being reported.
+			var first: int = obj.bump()
+			var second: int = obj.bump()
+			check(first == 1, "the Rust half started at %s, expected 1" % first)
+			check(second == 2, "the Rust half did not keep state across calls, got %s" % second)
+
+			# A second object must not share it.
+			var other: Object = script.new()
+			var other_first: int = other.bump()
+			check(other_first == 1,
+				"two script objects shared one Rust state: the second started at %s" % other_first)
+			other.free()
+			obj.free()
+
 	done("refcounted_class")
 
 func test_virtuals() -> void:

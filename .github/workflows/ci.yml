@@ -137,6 +137,10 @@ jobs:
       # built by CI, and code nothing builds rots.
       - run: cargo check -p godot -p itest --features editor
       - run: cargo build -p editor-plugin
+
+      # `double-precision` selects a different set of builtin sizes, which the compile-time
+      # size assertions check. Nothing else builds it, and code nothing builds rots.
+      - run: cargo check -p godot --features double-precision
       - run: |
           cargo clippy -p godot -p itest --features editor -- \
             -D clippy::style -D clippy::complexity -D clippy::perf \

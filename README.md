@@ -206,7 +206,10 @@ Built and covered by the integration tests:
 - `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
   methods read as `node.add_child(&child)` and inherited ones need no base-class name
 - Reference-counted user classes: `#[godot_api(base = Resource)]` and friends are freed when
-  the last reference goes, with no `free()` call
+  the last reference goes, with no `free()` call, and a custom Resource saves and loads through
+  `ResourceSaver`/`ResourceLoader` with its `#[prop]` values intact
+- GDScript can `extends` a Rust class: the object carries a script instance and an extension
+  instance at once, each keeping its own per-instance state
 - Generated bindings for every non-editor engine class -- 954 classes, ~14,900 methods --
   called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
   Variant path. The three methods taking a pointer into something the API description does not

@@ -205,6 +205,13 @@ impl RustTestResource {
     fn set_payload(&mut self, value: i64) {
         self.payload = value;
     }
+
+    /// The same value as a property, which is what ResourceSaver writes to disk. A custom
+    /// Resource whose fields do not survive a save is not much of a Resource.
+    #[prop(set = set_payload)]
+    fn get_payload(&mut self) -> i64 {
+        self.payload
+    }
 }
 
 impl RustTestNode {
