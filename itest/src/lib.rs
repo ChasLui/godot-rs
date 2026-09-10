@@ -46,6 +46,7 @@ impl ExtensionLibrary for ItestLibrary {
             InitLevel::Scene => unsafe {
                 register_class::<RustTestNode>();
                 register_class::<RustRuntimeOnlyNode>();
+                register_class::<RustTestResource>();
             },
             // Levels are startup phases, not modes: Godot runs the Editor level during a game
             // run too. Registering something editor-only therefore needs an explicit check.
@@ -70,6 +71,7 @@ impl ExtensionLibrary for ItestLibrary {
             InitLevel::Scene => unsafe {
                 unregister_class::<RustTestNode>();
                 unregister_class::<RustRuntimeOnlyNode>();
+                unregister_class::<RustTestResource>();
             },
             InitLevel::Editor if is_editor() => unsafe {
                 // Strictly the reverse of init: the editor holds a live instance, so removing
@@ -160,6 +162,50 @@ impl RustPluginProbe {
     #[func]
     fn plugin_name_calls(&mut self) -> i64 {
         PLUGIN_NAME_CALLS.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// A reference-counted class, which every previous test class was not.
+///
+/// Everything else here descends from Node, which Godot does not reference-count: the engine
+/// frees it when the tree does, or the user calls `free`. A Resource is the other half of the
+/// object model -- GDScript drops the last reference and the object goes away by itself -- and
+/// nothing had ever registered one.
+struct RustTestResource {
+    payload: i64,
+}
+
+/// Counts how many `RustTestResource` instances Godot has told us to free.
+static RESOURCE_FREES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+impl Drop for RustTestResource {
+    fn drop(&mut self) {
+        RESOURCE_FREES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+#[godot_api(base = Resource)]
+impl RustTestResource {
+    fn init() -> Self {
+        Self { payload: 7 }
+    }
+
+    #[func]
+    fn payload(&mut self) -> i64 {
+        self.payload
+    }
+
+    #[func]
+    fn set_payload(&mut self, value: i64) {
+        self.payload = value;
+    }
+}
+
+impl RustTestNode {
+    /// Not a `#[func]` on the resource itself -- by the time the answer matters, the resource
+    /// is meant to be gone.
+    fn resource_frees() -> i64 {
+        RESOURCE_FREES.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
@@ -719,6 +765,12 @@ impl RustTestNode {
         unsafe { label.free() };
 
         entered
+    }
+
+    /// How many `RustTestResource` instances the engine has freed.
+    #[func]
+    fn resource_free_count(&mut self) -> i64 {
+        Self::resource_frees()
     }
 
     #[func]

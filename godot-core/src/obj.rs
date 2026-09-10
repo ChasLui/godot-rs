@@ -38,10 +38,10 @@ fn refcount_methods() -> &'static RefCountMethods {
 }
 
 /// Godot's `Object::NOTIFICATION_POSTINITIALIZE`.
-const NOTIFICATION_POSTINITIALIZE: i32 = 0;
+pub(crate) const NOTIFICATION_POSTINITIALIZE: i32 = 0;
 
 /// `Object::notification`, resolved once.
-fn object_notification() -> &'static crate::ptrcall::MethodBind {
+pub(crate) fn object_notification() -> &'static crate::ptrcall::MethodBind {
     static METHOD: std::sync::OnceLock<crate::ptrcall::MethodBind> = std::sync::OnceLock::new();
     METHOD.get_or_init(|| unsafe {
         crate::ptrcall::MethodBind::resolve(

@@ -151,12 +151,18 @@ static BINDING_CALLBACKS: sys::GDExtensionInstanceBindingCallbacks =
 /// or any virtual dispatch into `T` would find no instance.
 unsafe extern "C" fn create_instance<T: GodotClass>(
     class_userdata: *mut std::ffi::c_void,
-    _notify_postinitialize: sys::GDExtensionBool,
+    notify_postinitialize: sys::GDExtensionBool,
 ) -> sys::GDExtensionObjectPtr {
     let userdata = &*(class_userdata as *const ClassUserdata);
 
+    // `classdb_construct_object3`, not `2`: the engine treats this callback as
+    // `create_instance3`, whose contract is that it returns a reference-counted object with a
+    // refcount of 1 that the caller already owns. Version 2 constructs *without* claiming the
+    // refcount, so the reference the constructor establishes is never accounted for and the
+    // object outlives its last user -- reachable only through a RefCounted base, which is why
+    // every Node-derived class was fine.
     let base_name = StringName::new(T::BASE_NAME);
-    let object = sys::interface_fn!(classdb_construct_object2)(base_name.as_ptr());
+    let object = sys::interface_fn!(classdb_construct_object3)(base_name.as_ptr());
 
     let instance = match crate::panics::catch(
         || format!("{}::init", T::CLASS_NAME),
@@ -184,6 +190,19 @@ unsafe extern "C" fn create_instance<T: GodotClass>(
         instance as *mut std::ffi::c_void,
         &BINDING_CALLBACKS as *const _,
     );
+
+    // `classdb_construct_object3` builds the object *without* post-initialising it, and the
+    // engine uses this argument to say whether finishing the job is ours. Sending it after
+    // `object_set_instance` means the class sees its own NOTIFICATION_POSTINITIALIZE, the same
+    // one a GDScript class receives.
+    if notify_postinitialize != 0 {
+        let reversed = false;
+        let args: [sys::GDExtensionConstTypePtr; 2] = [
+            &crate::obj::NOTIFICATION_POSTINITIALIZE as *const i32 as sys::GDExtensionConstTypePtr,
+            &reversed as *const bool as sys::GDExtensionConstTypePtr,
+        ];
+        crate::obj::object_notification().ptrcall_void(object, &args);
+    }
 
     object
 }

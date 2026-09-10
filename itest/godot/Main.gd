@@ -16,6 +16,7 @@ const EXPECTED_TESTS := [
 	"panic_is_contained", "previously_untested_apis",
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
+	"refcounted_class",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -40,6 +41,7 @@ func _ready() -> void:
 	test_previously_untested_apis()
 	test_math_builtins()
 	test_collections()
+	test_refcounted_class()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
 	call_deferred("start_virtual_test")
 	return
@@ -70,6 +72,57 @@ func start_virtual_test() -> void:
 	await get_tree().create_timer(0.25).timeout
 	await test_virtuals()
 	report()
+
+func test_refcounted_class() -> void:
+	# Every other Rust class here descends from Node, which Godot never reference-counts.
+	# A Resource is freed by dropping the last reference, a path nothing had exercised.
+	check(ClassDB.class_exists("RustTestResource"), "the refcounted class was not registered")
+	if not ClassDB.class_exists("RustTestResource"):
+		return
+
+	# Control: a built-in Resource through the same path, so the measurement is known to work
+	# before it is used to accuse the Rust class of anything.
+	var control_before := Performance.get_monitor(Performance.OBJECT_COUNT)
+	var control: Object = ClassDB.instantiate("Resource")
+	check(control != null, "could not instantiate a built-in Resource")
+	control = null
+	var control_after := Performance.get_monitor(Performance.OBJECT_COUNT)
+	check(control_after == control_before,
+		"the object-count measurement is unreliable: a built-in Resource went from %s to %s"
+			% [control_before, control_after])
+
+	var before := Performance.get_monitor(Performance.OBJECT_COUNT)
+
+	var res: Object = ClassDB.instantiate("RustTestResource")
+	check(res != null, "could not instantiate a refcounted Rust class")
+	if res == null:
+		return
+	check(res.payload() == 7, "refcounted class did not initialise, got %s" % res.payload())
+	res.set_payload(11)
+	check(res.payload() == 11, "refcounted class did not keep state")
+	# The reference count must match a built-in Resource's: the engine treats our creation
+	# callback as create_instance3, which owes it an object whose refcount is already claimed.
+	check(res.get_reference_count() == 1,
+		"a fresh Rust Resource has refcount %s, expected 1" % res.get_reference_count())
+
+	# Dropping the last reference must free it: no free() call, and no leak either.
+	res = null
+
+	# Dropping the last reference must actually run the Rust destructor, not merely stop
+	# anyone from reaching the object.
+	var probe: Object = ClassDB.instantiate("RustTestNode")
+	check(probe.resource_free_count() == 1,
+		"the Rust resource was never freed: %s destructors ran" % probe.resource_free_count())
+	# A class instantiated by the engine is post-initialised by us, since the object is built
+	# without it: the engine asks for it through the create callback's argument.
+	check(probe.notification_seen(0),
+		"NOTIFICATION_POSTINITIALIZE never reached a Rust class")
+	probe.free()
+	var after := Performance.get_monitor(Performance.OBJECT_COUNT)
+	check(after == before,
+		"a refcounted Rust class leaked: object count went from %s to %s" % [before, after])
+
+	done("refcounted_class")
 
 func test_virtuals() -> void:
 	var parts: PackedStringArray = str(virtual_node.virtual_counts()).split(",")
