@@ -205,6 +205,8 @@ Built and covered by the integration tests:
     signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
   methods read as `node.add_child(&child)` and inherited ones need no base-class name
+- `Gd::instance_id` / `Gd::from_instance_id` for holding an object across frames: a `Gd` to a
+  freed object dangles with no way to test it, an id resolves to `None`
 - Reference-counted user classes: `#[godot_api(base = Resource)]` and friends are freed when
   the last reference goes, with no `free()` call, and a custom Resource saves and loads through
   `ResourceSaver`/`ResourceLoader` with its `#[prop]` values intact

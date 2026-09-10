@@ -771,6 +771,46 @@ impl RustTestNode {
         count
     }
 
+    /// Whether an object id outlives the object it names.
+    ///
+    /// A `Gd` to a manually-managed object dangles the moment someone frees it, and nothing can
+    /// test a dangling pointer. An id can be tested, which is what makes it the way to hold an
+    /// object across frames.
+    ///
+    /// Returns a bitmask so a wrong answer is distinguishable from a crash: 1 = the live
+    /// lookup found it, 2 = the class was checked rather than assumed, 4 = the lookup after
+    /// `free` came back empty.
+    #[func]
+    fn instance_id_roundtrip(&mut self) -> i64 {
+        let Some(node) = Gd::<classes::Node>::new() else {
+            return 0;
+        };
+
+        let id = node.instance_id();
+        let mut result = 0;
+
+        if let Some(found) = Gd::<classes::Node>::from_instance_id(id) {
+            if found.as_obj_ptr() == node.as_obj_ptr() {
+                result |= 1;
+            }
+        }
+
+        // The id is engine-wide and says nothing about the class: a Node is not a Resource.
+        if Gd::<classes::Resource>::from_instance_id(id).is_none() {
+            result |= 2;
+        }
+
+        // SAFETY: Node is not reference-counted and this is the only handle.
+        unsafe { node.free() };
+
+        // The whole point: the id survives the object, and resolving it now finds nothing.
+        if Gd::<classes::Node>::from_instance_id(id).is_none() {
+            result |= 4;
+        }
+
+        result
+    }
+
     /// Adds a freshly built engine object to the live scene tree.
     ///
     /// `classdb_construct_object` builds an object but leaves it to the caller to send

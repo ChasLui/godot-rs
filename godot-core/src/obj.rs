@@ -206,8 +206,46 @@ impl<T: GodotObject> Gd<T> {
     }
 
     /// The engine-wide id of this object, stable while the object lives.
+    ///
+    /// Pair with [`Gd::from_instance_id`] to hold on to an object safely: a `Gd` keeps no claim
+    /// on a manually-managed object, so it dangles once someone calls `free`. An id does not --
+    /// looking it up afterwards simply answers `None`.
     pub fn instance_id(&self) -> u64 {
         unsafe { sys::interface_fn!(object_get_instance_id)(self.ptr) }
+    }
+
+    /// Looks up an object by the id [`Gd::instance_id`] returned.
+    ///
+    /// Answers `None` if the object is gone, or if it is not a `T` -- the id is engine-wide, so
+    /// the class is checked rather than assumed.
+    ///
+    /// This is how an object is held across frames. A stored `Gd` pointing at a freed object is
+    /// a dangling pointer with no way to test it; a stored id is always safe to resolve.
+    pub fn from_instance_id(id: u64) -> Option<Self> {
+        unsafe {
+            let ptr = sys::interface_fn!(object_get_instance_from_id)(id);
+            if ptr.is_null() {
+                return None;
+            }
+
+            // The id says nothing about the class, so the engine is asked whether this object
+            // really is a `T`.
+            let name = crate::builtin::StringName::new(T::CLASS_NAME);
+            let tag = sys::interface_fn!(classdb_get_class_tag)(name.as_ptr());
+            if tag.is_null() {
+                return None;
+            }
+
+            let casted = sys::interface_fn!(object_cast_to)(ptr, tag);
+            let result = Self::from_obj_ptr(casted)?;
+
+            if T::IS_REFCOUNTED {
+                // The lookup hands back a borrowed pointer; this handle owns a count of its own.
+                let _: bool = refcount_methods().reference.ptrcall(casted, &[]);
+            }
+
+            Some(result)
+        }
     }
 }
 

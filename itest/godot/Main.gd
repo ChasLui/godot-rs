@@ -214,6 +214,14 @@ func test_virtuals() -> void:
 		"an optional object argument did not behave as null, got %s"
 			% virtual_node.optional_object_argument())
 
+	# An instance id outlives the object it names, which is what makes it safe to store where
+	# a Gd would dangle. 1 = live lookup found it, 2 = the class is checked, 4 = the lookup
+	# after free came back empty.
+	var id_result: int = virtual_node.instance_id_roundtrip()
+	check(id_result & 1 != 0, "looking up a live object by id did not find it")
+	check(id_result & 2 != 0, "an id resolved to the wrong class without complaint")
+	check(id_result & 4 != 0, "an id still resolved after the object was freed")
+
 	# An object built by Gd::new must be finished, not merely constructed: the interface
 	# requires NOTIFICATION_POSTINITIALIZE after construction, and an object that never got it
 	# behaves normally right up until the engine puts it in the tree.
