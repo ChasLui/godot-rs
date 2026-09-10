@@ -462,6 +462,10 @@ unsafe extern "C" fn set_property<T: GodotClass>(
 /// Must be called from an extension initialization callback, at a level where ClassDB is ready
 /// (`InitLevel::Scene` for ordinary node types).
 pub unsafe fn register_class<T: GodotClass>() {
+    if !base_is_registerable::<T>() {
+        return;
+    }
+
     let class_name = StringName::new(T::CLASS_NAME);
     let base_name = StringName::new(T::BASE_NAME);
 
@@ -504,6 +508,11 @@ pub unsafe fn register_class<T: GodotClass>() {
 
     // Methods can only be attached once the class exists in ClassDB, and a property refers to
     // its accessors by name, so it has to come after them.
+    registered_classes()
+        .lock()
+        .expect("registry lock poisoned")
+        .insert(T::CLASS_NAME);
+
     // After registration, so the class itself is in ClassDB and the engine can answer.
     check_virtual_names::<T>();
 
@@ -517,8 +526,52 @@ pub unsafe fn register_class<T: GodotClass>() {
 /// # Safety
 /// Only valid for a class previously registered with [`register_class`].
 pub unsafe fn unregister_class<T: GodotClass>() {
+    registered_classes()
+        .lock()
+        .expect("registry lock poisoned")
+        .remove(T::CLASS_NAME);
+
     let class_name = StringName::new(T::CLASS_NAME);
     sys::interface_fn!(classdb_unregister_extension_class)(sys::library(), class_name.as_ptr());
+}
+
+/// Class names this extension has registered, so a class can be told from an engine one.
+fn registered_classes() -> &'static std::sync::Mutex<std::collections::HashSet<&'static str>> {
+    static REGISTERED: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashSet<&'static str>>,
+    > = std::sync::OnceLock::new();
+    REGISTERED.get_or_init(Default::default)
+}
+
+/// Whether `T` may be registered at all.
+///
+/// A class may not inherit another class from this extension. `base = X` is only a name, so
+/// pointing it at one of our own classes compiles, registers, and runs -- and is undefined
+/// behaviour. Each class keeps its Rust state in its own `Box`, but an object has exactly one
+/// `object_set_instance`, so the base class's methods reinterpret the derived class's memory as
+/// their own. With compatible layouts that silently returns the wrong field; with incompatible
+/// ones it is a type confusion that corrupts memory.
+///
+/// Supporting it would mean layering per-class state behind one instance pointer. Refusing is
+/// what the object model actually supports, so it is refused loudly rather than left to
+/// misbehave quietly.
+///
+/// This only catches the base registered *before* the inheritor, which is the order that works
+/// at all: registering an inheritor first fails in the engine anyway, since ClassDB does not yet
+/// have the base.
+fn base_is_registerable<T: GodotClass>() -> bool {
+    let registered = registered_classes().lock().expect("registry lock poisoned");
+    if registered.contains(T::BASE_NAME) {
+        crate::logging::godot_error(&format!(
+            "{} cannot inherit {}: a class registered by this extension cannot be a base class. \
+             Each class owns its Rust state, and an object has only one, so the base class's \
+             methods would read the derived class's fields. Inherit an engine class instead.",
+            T::CLASS_NAME,
+            T::BASE_NAME,
+        ));
+        return false;
+    }
+    true
 }
 
 /// Reports `#[godot_virtual]` methods whose names the base class does not have.

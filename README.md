@@ -232,6 +232,10 @@ Built and covered by the integration tests:
 
 **Not implemented.** These are absences, not oversights to be discovered later:
 
+- A Rust class cannot inherit another Rust class -- `base` must name an engine class. Each
+  class owns its Rust state and an object holds exactly one, so the base class's methods would
+  read the derived class's fields. Registration refuses it with an error rather than allowing
+  the type confusion.
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
 - Windows, Android and iOS are not covered by CI

@@ -122,6 +122,12 @@ func test_refcounted_class() -> void:
 	check(after == before,
 		"a refcounted Rust class leaked: object count went from %s to %s" % [before, after])
 
+	# A Rust class cannot inherit another Rust class: an object holds one Rust state, so the
+	# base class's methods would read the derived class's fields. Registration refuses it, and
+	# the refusal is what is checked -- registering it used to succeed and return nonsense.
+	check(not ClassDB.class_exists("RustDerivedResource"),
+		"a class inheriting another Rust class was registered, which is undefined behaviour")
+
 	done("refcounted_class")
 
 func test_virtuals() -> void:

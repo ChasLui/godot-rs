@@ -47,6 +47,9 @@ impl ExtensionLibrary for ItestLibrary {
                 register_class::<RustTestNode>();
                 register_class::<RustRuntimeOnlyNode>();
                 register_class::<RustTestResource>();
+                // Refused, and the refusal is the point -- see RustDerivedResource. The error
+                // it prints is expected.
+                register_class::<RustDerivedResource>();
             },
             // Levels are startup phases, not modes: Godot runs the Editor level during a game
             // run too. Registering something editor-only therefore needs an explicit check.
@@ -71,6 +74,9 @@ impl ExtensionLibrary for ItestLibrary {
             InitLevel::Scene => unsafe {
                 unregister_class::<RustTestNode>();
                 unregister_class::<RustRuntimeOnlyNode>();
+                // Inheritors first: the interface header says unregistering a parent before
+                // a class that inherits it fails.
+                unregister_class::<RustDerivedResource>();
                 unregister_class::<RustTestResource>();
             },
             InitLevel::Editor if is_editor() => unsafe {
@@ -206,6 +212,27 @@ impl RustTestNode {
     /// is meant to be gone.
     fn resource_frees() -> i64 {
         RESOURCE_FREES.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// A Rust class whose base is another Rust class, which the object model cannot support.
+///
+/// `base = X` is only a name, so this compiles and used to register: the derived object then
+/// carried one Rust state that both classes claimed, and the base class's methods read the
+/// derived class's fields. Registration must refuse it.
+struct RustDerivedResource {
+    extra: i64,
+}
+
+#[godot_api(base = RustTestResource)]
+impl RustDerivedResource {
+    fn init() -> Self {
+        Self { extra: 42 }
+    }
+
+    #[func]
+    fn extra(&mut self) -> i64 {
+        self.extra
     }
 }
 
