@@ -191,8 +191,9 @@ See [`examples/editor-plugin`](examples/editor-plugin).
 Built and covered by the integration tests:
 
 - Class registration, instantiation from GDScript and the editor
-- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). Properties and signal
-  arguments may be any builtin type or an object, and an object declares its class, so the
+- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). Method arguments keep the
+  names and types written in Rust, so GDScript's completion shows `damage(amount: int)` rather
+  than `damage(arg0)`. Properties and signal arguments may be any builtin type or an object, and an object declares its class, so the
   inspector shows a typed slot and the connection dialog shows the signal's real shape. A
   property may carry a hint -- `#[prop(set = ..., hint = PROPERTY_HINT_RANGE, hint_string =
   "0,100")]` is GDScript's `@export_range(0, 100)`
@@ -263,6 +264,12 @@ Built and covered by the integration tests:
 
 The quick-start example above is also the crate-level documentation, and runs as a doctest, so
 the two cannot drift apart.
+
+Run the integration tests through `check.sh`, never by copying the library into
+`itest/godot/lib/` by hand. Godot loads whatever is sitting there, so a copy without a rebuild
+runs the *previous* build — silently, and with results that look like real failures. Every
+change to `godot-core`, `godot-macros` or the generator affects `itest` through a rebuild, and
+`./check.sh itest` is what makes sure one happened.
 
 ### Performance
 

@@ -225,6 +225,24 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# An exported method describes its arguments: their names as written in Rust, and their
+	# types. Without this the editor offers `set_offset(arg0)` and says nothing about it.
+	var method_args: Array = []
+	var method_ret := -1
+	for m in virtual_node.get_method_list():
+		if m.name == "read_other_rust_state":
+			method_args = m.args
+			method_ret = m.return.type
+	check(method_args.size() == 1,
+		"the method declares %s arguments, expected 1" % method_args.size())
+	if method_args.size() == 1:
+		check(method_args[0].name == "other",
+			"the argument is called %s, expected the Rust name `other`" % method_args[0].name)
+		check(method_args[0].type == TYPE_OBJECT,
+			"the argument is declared as type %s" % method_args[0].type)
+		check(method_args[0].class_name == "Node",
+			"the argument declares class %s, expected Node" % method_args[0].class_name)
+
 	# A property hint: without it the inspector draws a plain spin box, with it a slider
 	# bounded by the hint string. The value round trip cannot see the difference, so the
 	# declaration is what gets checked.

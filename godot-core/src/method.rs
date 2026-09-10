@@ -9,7 +9,18 @@ use godot_sys as sys;
 pub struct MethodDecl<T> {
     pub name: &'static str,
     pub func: fn(&mut T, &[Variant]) -> Variant,
-    pub arg_count: u32,
+    pub args: &'static [MethodArg],
+}
+
+/// One argument of an exported method, as the engine should describe it.
+///
+/// Declaring names and types is what makes a method readable from GDScript: without them the
+/// editor offers `damage(arg0, arg1)` and says nothing about what either one is.
+pub struct MethodArg {
+    pub name: &'static str,
+    pub variant_type: sys::GDExtensionVariantType,
+    /// For an object argument, the class it holds; empty otherwise.
+    pub class_name: &'static str,
 }
 
 /// Leaked per-method state handed to Godot as `method_userdata`.
@@ -84,6 +95,20 @@ impl PropertyStrings {
         }
     }
 
+    /// Builds a descriptor of the given type, or an "any Variant" one when the type is NIL.
+    fn as_typed_info(
+        &mut self,
+        variant_type: sys::GDExtensionVariantType,
+    ) -> sys::GDExtensionPropertyInfo {
+        let mut info = self.as_variant_info();
+        if variant_type != sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
+            info.type_ = variant_type;
+            // NIL_IS_VARIANT only belongs on an argument that really is any type.
+            info.usage = PROPERTY_USAGE_DEFAULT;
+        }
+        info
+    }
+
     /// Builds an "any Variant" property descriptor pointing at this struct's strings.
     fn as_variant_info(&mut self) -> sys::GDExtensionPropertyInfo {
         sys::GDExtensionPropertyInfo {
@@ -109,7 +134,7 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     // Leaked deliberately: Godot may dispatch through this after Rust statics are gone.
     let userdata = Box::into_raw(Box::new(MethodUserdata::<T> {
         func: decl.func,
-        arg_count: decl.arg_count,
+        arg_count: decl.args.len() as u32,
         name: decl.name,
     }));
 
@@ -117,22 +142,29 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     let mut return_info = return_strings.as_variant_info();
 
     // Kept in scope so the pointers inside `arg_infos` stay valid across the call below.
-    let mut arg_strings: Vec<PropertyStrings> = (0..decl.arg_count)
-        .map(|i| PropertyStrings::new(&format!("arg{i}")))
+    let mut arg_strings: Vec<PropertyStrings> = decl
+        .args
+        .iter()
+        .map(|a| {
+            let mut strings = PropertyStrings::new(a.name);
+            strings.class_name = StringName::new(a.class_name);
+            strings
+        })
         .collect();
 
     let mut arg_infos: Vec<sys::GDExtensionPropertyInfo> = arg_strings
         .iter_mut()
-        .map(|s| s.as_variant_info())
+        .zip(decl.args)
+        .map(|(s, arg)| s.as_typed_info(arg.variant_type))
         .collect();
 
     let mut arg_metadata: Vec<sys::GDExtensionClassMethodArgumentMetadata> = vec![
             sys::GDExtensionClassMethodArgumentMetadata_GDEXTENSION_METHOD_ARGUMENT_METADATA_NONE;
-            decl.arg_count as usize
+            decl.args.len()
         ];
 
     // An empty Vec yields a dangling pointer, which the engine would still read; send null.
-    let (arg_infos_ptr, arg_metadata_ptr) = if decl.arg_count == 0 {
+    let (arg_infos_ptr, arg_metadata_ptr) = if decl.args.is_empty() {
         (std::ptr::null_mut(), std::ptr::null_mut())
     } else {
         (arg_infos.as_mut_ptr(), arg_metadata.as_mut_ptr())
@@ -154,7 +186,7 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     info.return_value_info = &mut return_info as *mut _;
     info.return_value_metadata =
         sys::GDExtensionClassMethodArgumentMetadata_GDEXTENSION_METHOD_ARGUMENT_METADATA_NONE;
-    info.argument_count = decl.arg_count;
+    info.argument_count = decl.args.len() as u32;
     info.arguments_info = arg_infos_ptr;
     info.arguments_metadata = arg_metadata_ptr;
 

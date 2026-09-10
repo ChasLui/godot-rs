@@ -95,12 +95,27 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
     let registrations = exported.iter().map(|e| {
         let name = &e.godot_name;
         let shim = &e.shim_ident;
-        let argc = e.arg_types.len() as u32;
+        let args = e.arg_names.iter().zip(&e.arg_types).map(|(arg_name, ty)| {
+            // A `#[func]` argument may be any type the Variant conversions cover, including
+            // ones a property cannot be; an unmappable type is simply declared as Variant
+            // rather than rejected, since the call itself works either way.
+            let declared = variant_type_of(ty)
+                .unwrap_or_else(|_| quote!((::godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL, "")));
+            // Written as constant expressions so the array can be promoted to `'static`,
+            // which is what lets the declaration outlive the registration call.
+            quote! {
+                ::godot::godot_core::method::MethodArg {
+                    name: #arg_name,
+                    variant_type: #declared.0,
+                    class_name: #declared.1,
+                }
+            }
+        });
         quote! {
             ::godot::godot_core::method::register_method(::godot::godot_core::method::MethodDecl::<Self> {
                 name: #name,
                 func: Self::#shim,
-                arg_count: #argc,
+                args: &[#(#args),*],
             });
         }
     });
@@ -396,6 +411,7 @@ struct Exported {
     shim_ident: syn::Ident,
     godot_name: String,
     arg_types: Vec<syn::Type>,
+    arg_names: Vec<String>,
     has_return: bool,
 }
 
@@ -403,6 +419,7 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
     let ident = method.sig.ident.clone();
 
     let mut arg_types = Vec::new();
+    let mut arg_names = Vec::new();
     let mut saw_receiver = false;
 
     for arg in &method.sig.inputs {
@@ -416,7 +433,15 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
                 }
                 saw_receiver = true;
             }
-            FnArg::Typed(pat) => arg_types.push((*pat.ty).clone()),
+            FnArg::Typed(pat) => {
+                arg_types.push((*pat.ty).clone());
+                // The name the user wrote, so the editor shows `damage(amount)` rather than
+                // `damage(arg0)`. A destructuring pattern has no single name to show.
+                arg_names.push(match &*pat.pat {
+                    syn::Pat::Ident(ident) => ident.ident.to_string(),
+                    _ => format!("arg{}", arg_types.len() - 1),
+                });
+            }
         }
     }
 
@@ -432,6 +457,7 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
         godot_name: ident.to_string(),
         ident,
         arg_types,
+        arg_names,
         has_return: !matches!(method.sig.output, ReturnType::Default),
     })
 }
