@@ -185,6 +185,11 @@ impl<T: GodotObject> Gd<T> {
     }
 
     /// Attempts to view this object as `Target`, checking the engine's own class hierarchy.
+    ///
+    /// `Target` is an engine class, which is what makes the class tag reliable here: a tag
+    /// identifies a C++ type. Extension classes share the tag of the engine base they were
+    /// registered under, so this could not tell two of them apart -- see
+    /// [`crate::registry::rust_instance`], which compares class names instead.
     pub fn try_cast<Target: GodotObject>(&self) -> Option<Gd<Target>> {
         unsafe {
             let name = crate::builtin::StringName::new(Target::CLASS_NAME);

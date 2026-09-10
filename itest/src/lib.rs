@@ -771,6 +771,54 @@ impl RustTestNode {
         count
     }
 
+    /// Hands an object back to GDScript as a return value.
+    ///
+    /// The other direction from `takes_node2d`: a `Gd` has to survive being turned into a
+    /// Variant and read out again on the far side.
+    #[func]
+    fn make_node2d(&mut self) -> Gd<classes::Node2D> {
+        let node = Gd::<classes::Node2D>::new().expect("Node2D is a registered engine class");
+        node.set_name(&StringName::new("MadeInRust"));
+        node
+    }
+
+    /// Puts objects into the containers, which is the same Variant conversion under a different
+    /// name -- and the one that decides whether a class can keep a list of nodes.
+    #[func]
+    fn objects_through_containers(&mut self) -> i64 {
+        let Some(node) = Gd::<classes::Node2D>::new() else {
+            return -1;
+        };
+        let id = node.instance_id();
+
+        let mut array = VariantArray::new();
+        array.push(&node.to_variant());
+
+        let mut dict = Dictionary::new();
+        dict.set(&GString::new("node").to_variant(), &node.to_variant());
+
+        let from_array = Gd::<classes::Node2D>::try_from_variant(&array.get(0));
+        let from_dict = Gd::<classes::Node2D>::try_from_variant(
+            &dict.get(&GString::new("node").to_variant(), &Variant::nil()),
+        );
+
+        let mut result = 0;
+        if from_array.map(|g| g.instance_id()) == Some(id) {
+            result |= 1;
+        }
+        if from_dict.map(|g| g.instance_id()) == Some(id) {
+            result |= 2;
+        }
+        // A container holding a Node2D must not answer a Label request.
+        if Gd::<classes::Label>::try_from_variant(&array.get(0)).is_none() {
+            result |= 4;
+        }
+
+        // SAFETY: the containers hold Variants, which do not own a manually-managed node.
+        unsafe { node.free() };
+        result
+    }
+
     /// Reaches another Rust object's state directly, without going back through the engine.
     ///
     /// `Gd` names an engine object; the Rust fields behind it are reached with

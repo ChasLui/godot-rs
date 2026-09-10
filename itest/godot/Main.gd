@@ -225,6 +225,21 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# An object as a return value, and objects through Array and Dictionary. All three are the
+	# same Variant conversion seen from different sides.
+	var made: Object = virtual_node.make_node2d()
+	check(made != null, "a Rust method could not return an object")
+	if made != null:
+		check(made.get_class() == "Node2D", "returned object is a %s" % made.get_class())
+		check(made.name == "MadeInRust", "returned object lost its name: %s" % made.name)
+		made.free()
+
+	# 1 = out of an Array, 2 = out of a Dictionary, 4 = a wrong class is still refused there.
+	var container_result: int = virtual_node.objects_through_containers()
+	check(container_result & 1 != 0, "an object did not survive an Array")
+	check(container_result & 2 != 0, "an object did not survive a Dictionary")
+	check(container_result & 4 != 0, "a container handed out an object as the wrong class")
+
 	# A Variant records that it holds an object, not which class. Converting one back into a
 	# Gd<Node2D> must check: a Label is a Node but not a Node2D.
 	var label: Object = ClassDB.instantiate("Label")
