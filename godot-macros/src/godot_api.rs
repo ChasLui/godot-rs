@@ -110,12 +110,16 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         let getter = &p.getter;
         let variant_type = &p.variant_type;
         quote! {
-            ::godot::godot_core::signal::register_property::<Self>(
-                #name,
-                #variant_type,
-                #setter,
-                #getter,
-            );
+            {
+                let (__godot_type, __godot_class) = #variant_type;
+                ::godot::godot_core::signal::register_property::<Self>(
+                    #name,
+                    __godot_type,
+                    __godot_class,
+                    #setter,
+                    #getter,
+                );
+            }
         }
     });
 
@@ -682,6 +686,54 @@ fn variant_type_of(ty: &syn::Type) -> syn::Result<TokenStream> {
         "f32" | "f64" => "FLOAT",
         "GString" => "STRING",
         "StringName" => "STRING_NAME",
+        "NodePath" => "NODE_PATH",
+        "Vector2" => "VECTOR2",
+        "Vector2i" => "VECTOR2I",
+        "Vector3" => "VECTOR3",
+        "Vector3i" => "VECTOR3I",
+        "Vector4" => "VECTOR4",
+        "Rect2" => "RECT2",
+        "Rect2i" => "RECT2I",
+        "Color" => "COLOR",
+        "Transform2D" => "TRANSFORM2D",
+        "Transform3D" => "TRANSFORM3D",
+        "Basis" => "BASIS",
+        "Quaternion" => "QUATERNION",
+        "Plane" => "PLANE",
+        "AABB" => "AABB",
+        "Projection" => "PROJECTION",
+        "Rid" => "RID",
+        "Callable" => "CALLABLE",
+        "Signal" => "SIGNAL",
+        "Variant" => "NIL",
+        "VariantArray" => "ARRAY",
+        "Dictionary" => "DICTIONARY",
+        "PackedByteArray" => "PACKED_BYTE_ARRAY",
+        "PackedInt32Array" => "PACKED_INT32_ARRAY",
+        "PackedInt64Array" => "PACKED_INT64_ARRAY",
+        "PackedFloat32Array" => "PACKED_FLOAT32_ARRAY",
+        "PackedFloat64Array" => "PACKED_FLOAT64_ARRAY",
+        "PackedStringArray" => "PACKED_STRING_ARRAY",
+        "PackedVector2Array" => "PACKED_VECTOR2_ARRAY",
+        "PackedVector3Array" => "PACKED_VECTOR3_ARRAY",
+        "PackedVector4Array" => "PACKED_VECTOR4_ARRAY",
+        "PackedColorArray" => "PACKED_COLOR_ARRAY",
+        // `Gd<T>` is an object, and the engine wants to know *which* class: without it the
+        // inspector shows an untyped object slot and accepts anything dropped on it.
+        "Gd" => {
+            let class = object_class_of(path).ok_or_else(|| {
+                syn::Error::new(
+                    ty.span(),
+                    "a `Gd` property needs a concrete class, e.g. `Gd<Node>`",
+                )
+            })?;
+            return Ok(quote! {
+                (
+                    ::godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_OBJECT,
+                    <#class as ::godot::obj::GodotObject>::CLASS_NAME,
+                )
+            });
+        }
         other => {
             return Err(syn::Error::new(
                 ty.span(),
@@ -691,5 +743,17 @@ fn variant_type_of(ty: &syn::Type) -> syn::Result<TokenStream> {
     };
 
     let ident = format_ident!("GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_{}", tag);
-    Ok(quote!(::godot::sys::#ident))
+    Ok(quote!((::godot::sys::#ident, "")))
+}
+
+/// The `T` of a `Gd<T>` path, if that is what this is.
+fn object_class_of(path: &syn::TypePath) -> Option<TokenStream> {
+    let segment = path.path.segments.last()?;
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    match args.args.first()? {
+        syn::GenericArgument::Type(inner) => Some(quote!(#inner)),
+        _ => None,
+    }
 }

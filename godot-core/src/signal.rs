@@ -84,6 +84,7 @@ pub unsafe fn register_signal<T: GodotClass>(name: &str, arg_names: &[&str]) {
 pub unsafe fn register_property<T: GodotClass>(
     name: &str,
     variant_type: sys::GDExtensionVariantType,
+    property_class: &str,
     setter: &str,
     getter: &str,
 ) {
@@ -92,6 +93,9 @@ pub unsafe fn register_property<T: GodotClass>(
     let getter_name = StringName::new(getter);
 
     let mut strings = PropertyStrings::new(name);
+    // For an object property this names the class the value must be. Empty for everything else,
+    // where the Variant type says all there is to say.
+    strings.class_name = StringName::new(property_class);
     let info = strings.info(variant_type);
 
     sys::interface_fn!(classdb_register_extension_class_property)(

@@ -225,6 +225,31 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# Properties beyond numbers and strings. A Vector2 property is what a class exports most
+	# often, and an object property has to tell the engine which class it holds.
+	virtual_node.offset = Vector2(3, 4)
+	check(virtual_node.offset == Vector2(3, 4),
+		"a Vector2 property did not round-trip, got %s" % virtual_node.offset)
+
+	var peer_node: Object = ClassDB.instantiate("RustTestNode")
+	virtual_node.target = peer_node
+	check(virtual_node.target == peer_node, "an object property did not round-trip")
+
+	# The engine must know the property's class, or the inspector shows an untyped slot.
+	var found_class := ""
+	var offset_type := -1
+	for p in virtual_node.get_property_list():
+		if p.name == "target":
+			found_class = p.class_name
+		elif p.name == "offset":
+			offset_type = p.type
+	check(offset_type == TYPE_VECTOR2,
+		"the Vector2 property is declared as type %s" % offset_type)
+	check(found_class == "Node",
+		"the object property declares class %s, expected Node" % found_class)
+	virtual_node.target = null
+	peer_node.free()
+
 	# An object as a return value, and objects through Array and Dictionary. All three are the
 	# same Variant conversion seen from different sides.
 	var made: Object = virtual_node.make_node2d()

@@ -191,7 +191,9 @@ See [`examples/editor-plugin`](examples/editor-plugin).
 Built and covered by the integration tests:
 
 - Class registration, instantiation from GDScript and the editor
-- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`)
+- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). A property may be any
+  builtin type or an object; an object property declares its class, so the inspector shows a
+  typed slot rather than one that accepts anything
 - Any engine virtual can be overridden -- `_ready`, `_process`, `_input`, `_enter_tree`,
   `_to_string`, `_notification`, `_get`/`_set`/`_get_property_list`, ... -- by declaring a
   `#[godot_virtual]` method

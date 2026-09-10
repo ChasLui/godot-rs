@@ -290,6 +290,8 @@ struct RustTestNode {
     process_calls: i64,
     physics_calls: i64,
     accumulated_delta: f64,
+    offset: Vector2,
+    target: Option<Gd<classes::Node>>,
 }
 
 #[godot_api(base = Node)]
@@ -312,6 +314,8 @@ impl RustTestNode {
             process_calls: 0,
             physics_calls: 0,
             accumulated_delta: 0.0,
+            offset: Vector2::ZERO,
+            target: None,
         }
     }
 
@@ -769,6 +773,36 @@ impl RustTestNode {
 
         unsafe { tree.free() };
         count
+    }
+
+    /// A Vector2 property. Position and velocity are what a class exports most, and until now
+    /// the property types stopped at strings and numbers.
+    #[prop(set = set_offset)]
+    fn get_offset(&mut self) -> Vector2 {
+        self.offset
+    }
+
+    #[func]
+    fn set_offset(&mut self, value: Vector2) {
+        self.offset = value;
+    }
+
+    /// An object property. The engine is told which class it holds, so the inspector shows a
+    /// typed slot rather than an untyped one that accepts anything.
+    #[prop(set = set_target)]
+    fn get_target(&mut self) -> Gd<classes::Node> {
+        // SAFETY: the base object is alive for as long as the engine is calling in.
+        unsafe {
+            self.target
+                .clone()
+                .or_else(|| Gd::<classes::Node>::from_obj_ptr(self.base))
+                .expect("the base object is never null once the engine has set it")
+        }
+    }
+
+    #[func]
+    fn set_target(&mut self, value: Gd<classes::Node>) {
+        self.target = Some(value);
     }
 
     /// Hands an object back to GDScript as a return value.
