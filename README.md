@@ -191,7 +191,8 @@ See [`examples/editor-plugin`](examples/editor-plugin).
 Built and covered by the integration tests:
 
 - Class registration, instantiation from GDScript and the editor
-- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). Method arguments keep the
+- Methods (`#[func]`), properties (`#[prop]`), signals (`#[signal]`). A `#[func]` without a
+  receiver is a static method, reachable as `MyClass.make()`. Method arguments keep the
   names and types written in Rust, so GDScript's completion shows `damage(amount: int)` rather
   than `damage(arg0)`. Properties and signal arguments may be any builtin type or an object, and an object declares its class, so the
   inspector shows a typed slot and the connection dialog shows the signal's real shape. A

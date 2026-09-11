@@ -111,6 +111,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 }
             }
         });
+        let is_static = e.is_static;
         let ret = match &e.ret_type {
             Some(ty) => {
                 let declared = variant_type_of(ty).unwrap_or_else(|_| {
@@ -131,6 +132,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 name: #name,
                 func: Self::#shim,
                 args: &[#(#args),*],
+                is_static: #is_static,
                 ret: #ret,
             });
         }
@@ -431,6 +433,7 @@ struct Exported {
     arg_types: Vec<syn::Type>,
     arg_names: Vec<String>,
     has_return: bool,
+    is_static: bool,
     /// The declared return type, absent for a method returning nothing.
     ret_type: Option<syn::Type>,
 }
@@ -465,12 +468,9 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
         }
     }
 
-    if !saw_receiver {
-        return Err(syn::Error::new(
-            method.sig.span(),
-            "#[func] methods must take `&mut self`",
-        ));
-    }
+    // No receiver means a static method: callable as `MyClass.make()` from GDScript, with no
+    // instance involved. `&self` is still refused -- the shim needs `&mut`.
+    let is_static = !saw_receiver;
 
     Ok(Exported {
         shim_ident: format_ident!("__godot_shim_{}", ident),
@@ -479,6 +479,7 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
         arg_types,
         arg_names,
         has_return: !matches!(method.sig.output, ReturnType::Default),
+        is_static,
         ret_type: match &method.sig.output {
             ReturnType::Type(_, ty) => Some((**ty).clone()),
             ReturnType::Default => None,
@@ -493,6 +494,24 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
 fn shim_for(exported: &Exported) -> TokenStream {
     let shim_ident = &exported.shim_ident;
     let ident = &exported.ident;
+    // A static method never touches the instance; naming the parameter `_this` says so and
+    // keeps the shim's signature uniform for the registry.
+    let this_param = if exported.is_static {
+        format_ident!("_this")
+    } else {
+        format_ident!("this")
+    };
+    // An instance method needs the instance the registry promises it; a static one never
+    // unwraps, so a missing instance cannot be mistaken for a working call.
+    let unwrap_this = if exported.is_static {
+        quote!()
+    } else {
+        quote! {
+            let Some(this) = this else {
+                return Ok(::godot::godot_core::builtin::Variant::nil());
+            };
+        }
+    };
 
     let conversions = exported.arg_types.iter().enumerate().map(|(i, ty)| {
         let var = format_ident!("arg{}", i);
@@ -517,14 +536,19 @@ fn shim_for(exported: &Exported) -> TokenStream {
         .map(|i| format_ident!("arg{}", i))
         .collect();
 
+    let receiver = if exported.is_static {
+        quote!(Self::)
+    } else {
+        quote!(this.)
+    };
     let call = if exported.has_return {
         quote! {
-            let result = this.#ident(#(#arg_idents),*);
+            let result = #receiver #ident(#(#arg_idents),*);
             Ok(::godot::godot_core::builtin::ToGodot::to_variant(&result))
         }
     } else {
         quote! {
-            this.#ident(#(#arg_idents),*);
+            #receiver #ident(#(#arg_idents),*);
             Ok(::godot::godot_core::builtin::Variant::nil())
         }
     };
@@ -534,7 +558,7 @@ fn shim_for(exported: &Exported) -> TokenStream {
     quote! {
         #[doc(hidden)]
         fn #shim_ident(
-            this: &mut Self,
+            #this_param: ::std::option::Option<&mut Self>,
             args: &[::godot::godot_core::builtin::Variant],
         ) -> ::std::result::Result<
             ::godot::godot_core::builtin::Variant,
@@ -545,6 +569,7 @@ fn shim_for(exported: &Exported) -> TokenStream {
             if args.len() != #expected {
                 return Ok(::godot::godot_core::builtin::Variant::nil());
             }
+            #unwrap_this
             #(#conversions)*
             #call
         }

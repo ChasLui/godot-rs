@@ -782,6 +782,13 @@ impl RustTestNode {
         count
     }
 
+    /// A static method: called on the class, with no instance involved. GDScript reaches it
+    /// as `RustTestNode.describe_version(...)`.
+    #[func]
+    fn describe_version(major: i64, minor: i64) -> GString {
+        GString::new(&format!("v{major}.{minor}"))
+    }
+
     /// Whether a mistyped argument reaches the engine as a call error.
     ///
     /// The generated shim answers `Err` so `method_call` can set
@@ -793,8 +800,8 @@ impl RustTestNode {
         let wrong = [GString::new("not an int").to_variant()];
         let right = [7i64.to_variant()];
 
-        let rejected = Self::__godot_shim_echo_int(self, &wrong).is_err();
-        let accepted = Self::__godot_shim_echo_int(self, &right).is_ok();
+        let rejected = Self::__godot_shim_echo_int(Some(self), &wrong).is_err();
+        let accepted = Self::__godot_shim_echo_int(Some(self), &right).is_ok();
         rejected && accepted
     }
 

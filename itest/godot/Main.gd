@@ -225,6 +225,17 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# A static method is called on the class, without an instance. Registered as a normal
+	# method it would demand one and fail with INSTANCE_IS_NULL.
+	check(RustTestNode.describe_version(4, 7) == "v4.7",
+		"a static method did not answer: %s" % RustTestNode.describe_version(4, 7))
+
+	var static_flagged := false
+	for m in virtual_node.get_method_list():
+		if m.name == "describe_version":
+			static_flagged = (m.flags & METHOD_FLAG_STATIC) != 0
+	check(static_flagged, "the static method is not declared static")
+
 	# An exported method describes its arguments: their names as written in Rust, and their
 	# types. Without this the editor offers `set_offset(arg0)` and says nothing about it.
 	var method_args: Array = []
