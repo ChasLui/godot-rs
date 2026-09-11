@@ -235,6 +235,10 @@ func test_virtuals() -> void:
 	check(typed.echo_string("中文 üñî") == "中文 üñî", "ptrcall lost a string")
 	check(typed.add_one(41) == 42, "ptrcall lost an argument")
 
+	# Property assignment does *not* take this path -- breaking ptrcall's argument handling
+	# leaves the property checks above passing. Accessors are reached through the property
+	# machinery instead, so they are covered there and not duplicated here.
+
 	# An object through the typed path, in and out.
 	var made2: Object = typed.make_node2d()
 	check(made2 != null and made2.get_class() == "Node2D", "ptrcall lost an object return")
