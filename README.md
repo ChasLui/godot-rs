@@ -260,7 +260,7 @@ Built and covered by the integration tests:
 ## Development
 
 ```bash
-./check.sh              # fmt, clippy, unit tests, integration tests, editor tests
+./check.sh              # fmt, clippy, unit tests, docs, integration tests, editor tests
 ./check.sh itest        # integration tests only (needs Godot 4.7.2)
 ./check.sh bench        # measure call overhead against GDScript
 ./check.sh doc          # build docs, failing on broken links, and run doctests

@@ -440,7 +440,7 @@ mod tests {
     }
 }
 
-/// A nullable object in a [`Variant`].
+/// A nullable object in a [`Variant`](crate::builtin::Variant).
 ///
 /// `Gd<T>` is always a live object, so it cannot describe the null that Godot passes whenever an
 /// object argument is optional or a property is being cleared. `Option<Gd<T>>` can: nil converts

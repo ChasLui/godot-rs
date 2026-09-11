@@ -6,7 +6,9 @@
 set -o pipefail
 
 if [ "$#" -eq 0 ]; then
-    args=("fmt" "clippy" "test" "itest" "etest")
+    # `doc` is here because CI runs it: a default set that is narrower than CI means a green
+    # local run can still push a red build, which is exactly what it did once.
+    args=("fmt" "clippy" "test" "doc" "itest" "etest")
 else
     args=("$@")
 fi
