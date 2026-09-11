@@ -6,9 +6,9 @@
 set -o pipefail
 
 if [ "$#" -eq 0 ]; then
-    # `doc` is here because CI runs it: a default set that is narrower than CI means a green
-    # local run can still push a red build, which is exactly what it did once.
-    args=("fmt" "clippy" "test" "doc" "itest" "etest")
+    # Everything CI runs. A default set narrower than CI means a green local run can still
+    # push a red build, which is exactly what it did once.
+    args=("fmt" "clippy" "test" "doc" "editor" "examples" "itest" "etest")
 else
     args=("$@")
 fi
@@ -191,6 +191,18 @@ for arg in "${args[@]}"; do
         cmds+=("cp $target_dir/release/$lib itest/godot/lib/")
         cmds+=("ensureImported itest/godot")
         cmds+=("runGodot 180 $godotBin --headless --path itest/godot --scene res://bench/Bench.tscn")
+        ;;
+    editor)
+        # The editor configuration is a separate build of the same code, and CI checks it.
+        # `--features` is per-package, so the packages are named rather than using --workspace.
+        cmds+=("cargo check -p godot -p itest --features editor")
+        cmds+=("cargo build -p editor-plugin")
+        cmds+=("cargo clippy -p godot -p itest --features editor -- -D clippy::style -D clippy::complexity -D clippy::perf -D clippy::dbg_macro -D clippy::todo -D clippy::unimplemented -D warnings")
+        # A different set of builtin sizes, checked by the compile-time size assertions.
+        cmds+=("cargo check -p godot --features double-precision")
+        ;;
+    examples)
+        cmds+=("cargo build -p hello-world -p counter -p bouncing-ball -p editor-plugin")
         ;;
     doc)
         # Warnings as errors: a broken intra-doc link is how documentation rots unnoticed.
