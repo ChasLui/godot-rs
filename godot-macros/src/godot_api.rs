@@ -111,11 +111,27 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                 }
             }
         });
+        let ret = match &e.ret_type {
+            Some(ty) => {
+                let declared = variant_type_of(ty).unwrap_or_else(|_| {
+                    quote!((::godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL, ""))
+                });
+                quote! {
+                    Some(::godot::godot_core::method::MethodArg {
+                        name: "ret",
+                        variant_type: #declared.0,
+                        class_name: #declared.1,
+                    })
+                }
+            }
+            None => quote!(None),
+        };
         quote! {
             ::godot::godot_core::method::register_method(::godot::godot_core::method::MethodDecl::<Self> {
                 name: #name,
                 func: Self::#shim,
                 args: &[#(#args),*],
+                ret: #ret,
             });
         }
     });
@@ -413,6 +429,8 @@ struct Exported {
     arg_types: Vec<syn::Type>,
     arg_names: Vec<String>,
     has_return: bool,
+    /// The declared return type, absent for a method returning nothing.
+    ret_type: Option<syn::Type>,
 }
 
 fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
@@ -459,6 +477,10 @@ fn parse_exported(method: &ImplItemFn) -> syn::Result<Exported> {
         arg_types,
         arg_names,
         has_return: !matches!(method.sig.output, ReturnType::Default),
+        ret_type: match &method.sig.output {
+            ReturnType::Type(_, ty) => Some((**ty).clone()),
+            ReturnType::Default => None,
+        },
     })
 }
 

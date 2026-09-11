@@ -229,10 +229,15 @@ func test_virtuals() -> void:
 	# types. Without this the editor offers `set_offset(arg0)` and says nothing about it.
 	var method_args: Array = []
 	var method_ret := -1
+	var setter_return_usage := -1
+	var setter_return_type := -1
 	for m in virtual_node.get_method_list():
 		if m.name == "read_other_rust_state":
 			method_args = m.args
 			method_ret = m.return.type
+		elif m.name == "set_offset":
+			setter_return_type = m.return.type
+			setter_return_usage = m.return.usage
 	check(method_args.size() == 1,
 		"the method declares %s arguments, expected 1" % method_args.size())
 	if method_args.size() == 1:
@@ -242,6 +247,16 @@ func test_virtuals() -> void:
 			"the argument is declared as type %s" % method_args[0].type)
 		check(method_args[0].class_name == "Node",
 			"the argument declares class %s, expected Node" % method_args[0].class_name)
+	check(method_ret == TYPE_INT,
+		"the method declares return type %s, expected int" % method_ret)
+
+	# A method returning nothing must say so. Declared as returning a Variant instead, NIL
+	# carries PROPERTY_USAGE_NIL_IS_VARIANT and `var x = obj.set_offset(v)` looks sound.
+	check(setter_return_type == TYPE_NIL,
+		"a method returning nothing declares return type %s" % setter_return_type)
+	check(setter_return_usage & PROPERTY_USAGE_NIL_IS_VARIANT == 0,
+		"a method returning nothing is declared as returning any Variant (usage %s)"
+			% setter_return_usage)
 
 	# A property hint: without it the inspector draws a plain spin box, with it a slider
 	# bounded by the hint string. The value round trip cannot see the difference, so the

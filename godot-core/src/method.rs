@@ -10,6 +10,12 @@ pub struct MethodDecl<T> {
     pub name: &'static str,
     pub func: fn(&mut T, &[Variant]) -> Variant,
     pub args: &'static [MethodArg],
+    /// The return value, or `None` for a method that returns nothing.
+    ///
+    /// Declaring `None` matters: a method registered as returning a Variant when it returns
+    /// nothing tells GDScript to expect a value, and `var x = obj.set_thing(1)` then looks
+    /// reasonable rather than wrong.
+    pub ret: Option<MethodArg>,
 }
 
 /// One argument of an exported method, as the engine should describe it.
@@ -139,7 +145,13 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     }));
 
     let mut return_strings = PropertyStrings::new("ret");
-    let mut return_info = return_strings.as_variant_info();
+    if let Some(ret) = &decl.ret {
+        return_strings.class_name = StringName::new(ret.class_name);
+    }
+    let mut return_info = match &decl.ret {
+        Some(ret) => return_strings.as_typed_info(ret.variant_type),
+        None => return_strings.as_variant_info(),
+    };
 
     // Kept in scope so the pointers inside `arg_infos` stay valid across the call below.
     let mut arg_strings: Vec<PropertyStrings> = decl
@@ -182,7 +194,7 @@ pub unsafe fn register_method<T: GodotClass>(decl: MethodDecl<T>) {
     {
         info.method_flags = sys::GDExtensionClassMethodFlags_GDEXTENSION_METHOD_FLAG_NORMAL as u32;
     }
-    info.has_return_value = true as sys::GDExtensionBool;
+    info.has_return_value = decl.ret.is_some() as sys::GDExtensionBool;
     info.return_value_info = &mut return_info as *mut _;
     info.return_value_metadata =
         sys::GDExtensionClassMethodArgumentMetadata_GDEXTENSION_METHOD_ARGUMENT_METADATA_NONE;
