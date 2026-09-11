@@ -231,6 +231,9 @@ Built and covered by the integration tests:
 - Default arguments: a method with defaults gets a short form taking only the required
   arguments, plus an `_ex` form taking all of them. Object arguments that default to null are
   `Option<&Gd<T>>` in the full form, so the null is expressible rather than only omittable.
+- A mistyped argument is reported through Godot's call-error channel, so GDScript raises an
+  error naming the argument instead of receiving null from a call that appeared to work.
+  `Option<Gd<T>>` accepts the null Godot passes for a cleared or optional object.
 - Panics in user code are caught at the FFI boundary and reported through Godot's error output.
   Unwinding out of an `extern "C"` callback is undefined behaviour and aborts in practice, which
   would take the editor down with any unsaved work.

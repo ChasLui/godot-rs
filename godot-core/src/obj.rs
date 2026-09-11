@@ -439,3 +439,28 @@ mod tests {
         assert!(gd.is_none());
     }
 }
+
+/// A nullable object in a [`Variant`].
+///
+/// `Gd<T>` is always a live object, so it cannot describe the null that Godot passes whenever an
+/// object argument is optional or a property is being cleared. `Option<Gd<T>>` can: nil converts
+/// to `None` rather than failing, which is the difference between `node.target = null` working
+/// and being rejected as a type error.
+impl<T: GodotObject> crate::builtin::ToGodot for Option<Gd<T>> {
+    fn to_variant(&self) -> crate::builtin::Variant {
+        match self {
+            Some(gd) => gd.to_variant(),
+            None => crate::builtin::Variant::nil(),
+        }
+    }
+}
+
+impl<T: GodotObject> crate::builtin::FromGodot for Option<Gd<T>> {
+    fn try_from_variant(variant: &crate::builtin::Variant) -> Option<Self> {
+        if variant.is_nil() {
+            return Some(None);
+        }
+        // A non-null value still has to be the right class; only nil is special.
+        Gd::<T>::try_from_variant(variant).map(Some)
+    }
+}

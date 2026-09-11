@@ -483,8 +483,10 @@ func test_variant_roundtrip() -> void:
 
 	check(n.add_one(41) == 42, "add_one(41)")
 
-	# Wrong argument type must come back as null, not garbage or a crash.
-	check(n.echo_int("not an int") == null, "echo_int(wrong type) should be null")
+	# A wrongly typed argument is reported through the engine's call-error channel, which
+	# GDScript turns into an error -- calling it here would abort this test, so the check
+	# lives on the Rust side where the shim's answer is visible.
+	check(n.wrong_argument_is_reported(), "a mistyped argument was not reported as one")
 
 	n.free()
 	done("variant_roundtrip")

@@ -782,6 +782,22 @@ impl RustTestNode {
         count
     }
 
+    /// Whether a mistyped argument reaches the engine as a call error.
+    ///
+    /// The generated shim answers `Err` so `method_call` can set
+    /// GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT; returning nil instead would leave GDScript
+    /// with a call that looks like it worked. GDScript cannot observe the difference from the
+    /// outside -- both produce null -- so the shim is asked directly.
+    #[func]
+    fn wrong_argument_is_reported(&mut self) -> bool {
+        let wrong = [GString::new("not an int").to_variant()];
+        let right = [7i64.to_variant()];
+
+        let rejected = Self::__godot_shim_echo_int(self, &wrong).is_err();
+        let accepted = Self::__godot_shim_echo_int(self, &right).is_ok();
+        rejected && accepted
+    }
+
     /// A Vector2 property. Position and velocity are what a class exports most, and until now
     /// the property types stopped at strings and numbers.
     #[prop(set = set_offset)]
@@ -828,9 +844,11 @@ impl RustTestNode {
         }
     }
 
+    /// Takes an `Option`, so `node.target = null` clears it instead of being rejected as a
+    /// type error -- clearing an object property is ordinary in Godot.
     #[func]
-    fn set_target(&mut self, value: Gd<classes::Node>) {
-        self.target = Some(value);
+    fn set_target(&mut self, value: Option<Gd<classes::Node>>) {
+        self.target = value;
     }
 
     /// Hands an object back to GDScript as a return value.

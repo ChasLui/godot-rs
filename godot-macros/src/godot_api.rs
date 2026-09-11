@@ -496,10 +496,19 @@ fn shim_for(exported: &Exported) -> TokenStream {
 
     let conversions = exported.arg_types.iter().enumerate().map(|(i, ty)| {
         let var = format_ident!("arg{}", i);
+        let index = i as i32;
+        let declared = variant_type_of(ty).unwrap_or_else(|_| {
+            quote!((::godot::sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL, ""))
+        });
         quote! {
             let Some(#var) = <#ty as ::godot::godot_core::builtin::FromGodot>::try_from_variant(&args[#i])
             else {
-                return ::godot::godot_core::builtin::Variant::nil();
+                // Reported rather than swallowed: the engine turns this into a GDScript error
+                // naming the argument, where returning nil would look like a call that worked.
+                return Err(::godot::godot_core::method::ArgError {
+                    index: #index,
+                    expected: #declared.0,
+                });
             };
         }
     });
@@ -511,12 +520,12 @@ fn shim_for(exported: &Exported) -> TokenStream {
     let call = if exported.has_return {
         quote! {
             let result = this.#ident(#(#arg_idents),*);
-            ::godot::godot_core::builtin::ToGodot::to_variant(&result)
+            Ok(::godot::godot_core::builtin::ToGodot::to_variant(&result))
         }
     } else {
         quote! {
             this.#ident(#(#arg_idents),*);
-            ::godot::godot_core::builtin::Variant::nil()
+            Ok(::godot::godot_core::builtin::Variant::nil())
         }
     };
 
@@ -527,9 +536,14 @@ fn shim_for(exported: &Exported) -> TokenStream {
         fn #shim_ident(
             this: &mut Self,
             args: &[::godot::godot_core::builtin::Variant],
-        ) -> ::godot::godot_core::builtin::Variant {
+        ) -> ::std::result::Result<
+            ::godot::godot_core::builtin::Variant,
+            ::godot::godot_core::method::ArgError,
+        > {
+            // The registry checks the count before calling, so this only guards the shim
+            // being reached another way.
             if args.len() != #expected {
-                return ::godot::godot_core::builtin::Variant::nil();
+                return Ok(::godot::godot_core::builtin::Variant::nil());
             }
             #(#conversions)*
             #call

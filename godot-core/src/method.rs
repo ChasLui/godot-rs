@@ -8,7 +8,7 @@ use godot_sys as sys;
 /// of this, not a different mechanism.
 pub struct MethodDecl<T> {
     pub name: &'static str,
-    pub func: fn(&mut T, &[Variant]) -> Variant,
+    pub func: fn(&mut T, &[Variant]) -> Result<Variant, ArgError>,
     pub args: &'static [MethodArg],
     /// The return value, or `None` for a method that returns nothing.
     ///
@@ -16,6 +16,17 @@ pub struct MethodDecl<T> {
     /// nothing tells GDScript to expect a value, and `var x = obj.set_thing(1)` then looks
     /// reasonable rather than wrong.
     pub ret: Option<MethodArg>,
+}
+
+/// An argument the engine sent that the method cannot accept.
+///
+/// Godot has a call-error channel for this, and using it is what makes a mistyped call an
+/// error in GDScript rather than a call that quietly does nothing and answers null.
+pub struct ArgError {
+    /// Index of the offending argument.
+    pub index: i32,
+    /// The Variant type the method wanted there.
+    pub expected: sys::GDExtensionVariantType,
 }
 
 /// One argument of an exported method, as the engine should describe it.
@@ -31,7 +42,7 @@ pub struct MethodArg {
 
 /// Leaked per-method state handed to Godot as `method_userdata`.
 struct MethodUserdata<T> {
-    func: fn(&mut T, &[Variant]) -> Variant,
+    func: fn(&mut T, &[Variant]) -> Result<Variant, ArgError>,
     arg_count: u32,
     /// Kept for the panic message, which the engine's backtrace cannot supply.
     name: &'static str,
@@ -73,12 +84,22 @@ unsafe extern "C" fn method_call<T: GodotClass>(
     let this = &mut *(instance as *mut T);
     let result = crate::panics::catch(
         || format!("{}::{}", T::CLASS_NAME, userdata.name),
-        Variant::nil(),
+        Ok(Variant::nil()),
         || (userdata.func)(this, &owned_args),
     );
 
-    result.move_into(r_return);
-    (*r_error).error = sys::GDExtensionCallErrorType_GDEXTENSION_CALL_OK;
+    match result {
+        Ok(value) => {
+            value.move_into(r_return);
+            (*r_error).error = sys::GDExtensionCallErrorType_GDEXTENSION_CALL_OK;
+        }
+        Err(bad) => {
+            (*r_error).error =
+                sys::GDExtensionCallErrorType_GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT;
+            (*r_error).argument = bad.index;
+            (*r_error).expected = bad.expected as i32;
+        }
+    }
 }
 
 /// Owns the strings a `GDExtensionPropertyInfo` points at.
