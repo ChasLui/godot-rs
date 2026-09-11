@@ -225,6 +225,22 @@ func test_virtuals() -> void:
 	check(virtual_node.read_wrong_rust_state(peer) == 0,
 		"a mismatched class was not refused")
 
+	# A statically typed reference makes GDScript resolve calls at compile time, which is the
+	# ptrcall path -- arguments arrive natively rather than as Variants and have to be rebuilt
+	# from their declared types. Nothing but the static method exercised it before.
+	var typed: RustTestNode = virtual_node
+	check(typed.echo_int(42) == 42, "ptrcall lost an int")
+	check(typed.echo_float(1.5) == 1.5, "ptrcall lost a float")
+	check(typed.echo_bool(true) == true, "ptrcall lost a bool")
+	check(typed.echo_string("中文 üñî") == "中文 üñî", "ptrcall lost a string")
+	check(typed.add_one(41) == 42, "ptrcall lost an argument")
+
+	# An object through the typed path, in and out.
+	var made2: Object = typed.make_node2d()
+	check(made2 != null and made2.get_class() == "Node2D", "ptrcall lost an object return")
+	if made2 != null:
+		made2.free()
+
 	# A static method is called on the class, without an instance. Registered as a normal
 	# method it would demand one and fail with INSTANCE_IS_NULL.
 	check(RustTestNode.describe_version(4, 7) == "v4.7",
