@@ -221,6 +221,17 @@ unsafe extern "C" fn method_ptrcall<T: GodotClass>(
     if ret_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
         value.move_into(r_return as sys::GDExtensionVariantPtr);
     } else {
+        // The engine constructs this slot before the call -- `VariantInternal::initialize` on
+        // the declared type -- but the conversion that writes into it is a placement new,
+        // documented as taking "uninitialized memory". Writing straight over it therefore
+        // leaks whatever the engine put there: 64 bytes per call for an Array return, nothing
+        // visible for a scalar. Destroying it first is what makes the two agree.
+        //
+        // Same rule as the virtual-return path in `virtuals`, reached from the other side: one
+        // of the two parties has to release the old value, and here it is us.
+        if let Some(destroy) = sys::interface_fn!(variant_get_ptr_destructor)(ret_type) {
+            destroy(r_return);
+        }
         value.to_builtin(ret_type, r_return);
     }
 }

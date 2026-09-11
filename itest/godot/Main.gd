@@ -260,6 +260,17 @@ func test_virtuals() -> void:
 	if made2 != null:
 		made2.free()
 
+	# The ptrcall return slot is constructed by the engine before the call, so writing a
+	# container into it without releasing what is there leaks. Measured rather than reasoned
+	# about: the content is identical either way.
+	check(typed.make_array(3).size() == 3, "ptrcall lost an array return")
+	var mem_before := Performance.get_monitor(Performance.MEMORY_STATIC)
+	for i in 100000:
+		typed.make_array(2)
+	var mem_leaked := Performance.get_monitor(Performance.MEMORY_STATIC) - mem_before
+	check(mem_leaked < 2_000_000,
+		"the ptrcall return path leaked %s bytes over 100k calls" % mem_leaked)
+
 	# A static method is called on the class, without an instance. Registered as a normal
 	# method it would demand one and fail with INSTANCE_IS_NULL.
 	check(RustTestNode.describe_version(4, 7) == "v4.7",
