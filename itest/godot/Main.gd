@@ -239,6 +239,21 @@ func test_virtuals() -> void:
 	# leaves the property checks above passing. Accessors are reached through the property
 	# machinery instead, so they are covered there and not duplicated here.
 
+	# An object as an *argument* through this path: its native form is a pointer to the
+	# handle, one indirection more than a value type, and only the return direction was
+	# covered before.
+	# Declared as Node, not Object: the argument type has to match exactly or GDScript falls
+	# back to a dynamic call and this checks nothing.
+	var peer2: Node = ClassDB.instantiate("RustTestNode")
+	peer2.bump()
+	check(typed.read_other_rust_state(peer2) == 1,
+		"ptrcall lost an object argument: got %s" % typed.read_other_rust_state(peer2))
+	peer2.free()
+
+	# A container argument, whose native form is the container itself rather than a Variant.
+	check(typed.sum_array([1, 2, 3]) == 6,
+		"ptrcall lost an array argument: got %s" % typed.sum_array([1, 2, 3]))
+
 	# An object through the typed path, in and out.
 	var made2: Object = typed.make_node2d()
 	check(made2 != null and made2.get_class() == "Node2D", "ptrcall lost an object return")
