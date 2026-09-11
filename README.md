@@ -195,8 +195,9 @@ Built and covered by the integration tests:
   names and types written in Rust, so GDScript's completion shows `damage(amount: int)` rather
   than `damage(arg0)`. Properties and signal arguments may be any builtin type or an object, and an object declares its class, so the
   inspector shows a typed slot and the connection dialog shows the signal's real shape. A
-  property may carry a hint -- `#[prop(set = ..., hint = PROPERTY_HINT_RANGE, hint_string =
-  "0,100")]` is GDScript's `@export_range(0, 100)`
+  property may carry a hint and usage flags -- `#[prop(set = ..., hint = PROPERTY_HINT_RANGE,
+  hint_string = "0,100")]` is GDScript's `@export_range(0, 100)`, and
+  `usage = PROPERTY_USAGE_NONE` is a value that exists at runtime without being saved or shown
 - Any engine virtual can be overridden -- `_ready`, `_process`, `_input`, `_enter_tree`,
   `_to_string`, `_notification`, `_get`/`_set`/`_get_property_list`, ... -- by declaring a
   `#[godot_virtual]` method

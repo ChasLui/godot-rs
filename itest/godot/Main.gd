@@ -290,6 +290,25 @@ func test_virtuals() -> void:
 	check(speed_hint_string == "0,100,0.5",
 		"the range hint string is %s" % speed_hint_string)
 
+	# Property usage: a runtime-only value is neither saved nor shown, which the default
+	# usage (STORAGE | EDITOR) cannot say.
+	var transient_usage := -1
+	var speed_usage := -1
+	var hidden_usage := -1
+	for p in virtual_node.get_property_list():
+		if p.name == "transient":
+			transient_usage = p.usage
+		elif p.name == "speed":
+			speed_usage = p.usage
+		elif p.name == "hidden":
+			hidden_usage = p.usage
+	check(transient_usage == PROPERTY_USAGE_NONE,
+		"a runtime-only property declares usage %s, expected NONE" % transient_usage)
+	check(speed_usage == PROPERTY_USAGE_DEFAULT,
+		"an ordinary property no longer declares the default usage: %s" % speed_usage)
+	check(hidden_usage == PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_INTERNAL,
+		"OR'd usage flags came through as %s, expected STORAGE | INTERNAL" % hidden_usage)
+
 	# A signal's arguments carry their declared types, not just names: an untyped argument is
 	# a Variant, which tells the editor and GDScript nothing.
 	var signal_args: Array = []

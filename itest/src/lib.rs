@@ -794,6 +794,27 @@ impl RustTestNode {
         self.offset = value;
     }
 
+    /// A property that exists at runtime but is neither saved nor shown in the inspector.
+    /// The default usage cannot express that, and a computed value has no business being
+    /// written into a scene file.
+    #[prop(set = set_transient, usage = PROPERTY_USAGE_NONE)]
+    fn get_transient(&mut self) -> i64 {
+        self.counter * 2
+    }
+
+    #[func]
+    fn set_transient(&mut self, _value: i64) {}
+
+    /// Saved but hidden from the inspector, which needs two flags OR'd together -- the form
+    /// Godot's own usage constants are meant to be combined in.
+    #[prop(set = set_hidden, usage = PROPERTY_USAGE_STORAGE | PROPERTY_USAGE_INTERNAL)]
+    fn get_hidden(&mut self) -> i64 {
+        self.counter
+    }
+
+    #[func]
+    fn set_hidden(&mut self, _value: i64) {}
+
     /// An object property. The engine is told which class it holds, so the inspector shows a
     /// typed slot rather than an untyped one that accepts anything.
     #[prop(set = set_target)]

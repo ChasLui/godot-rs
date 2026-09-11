@@ -143,6 +143,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
         let variant_type = &p.variant_type;
         let hint = &p.hint;
         let hint_string = &p.hint_string;
+        let usage = &p.usage;
         quote! {
             {
                 let (__godot_type, __godot_class) = #variant_type;
@@ -152,6 +153,7 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
                     __godot_class,
                     #hint,
                     #hint_string,
+                    #usage,
                     #setter,
                     #getter,
                 );
@@ -670,6 +672,7 @@ struct Property {
     name: String,
     hint: TokenStream,
     hint_string: String,
+    usage: TokenStream,
     getter: String,
     setter: String,
     variant_type: TokenStream,
@@ -681,6 +684,8 @@ pub(crate) struct PropAttr {
     /// A `PropertyHint` constant name such as `PROPERTY_HINT_RANGE`, or none.
     pub hint: Option<String>,
     pub hint_string: String,
+    /// `PropertyUsageFlags` constant names, or none for Godot's default.
+    pub usage: Vec<String>,
 }
 
 /// Reads `#[prop(set = set_speed)]`, optionally with `hint` and `hint_string`, off a getter.
@@ -700,6 +705,7 @@ fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
     let mut setter = None;
     let mut hint = None;
     let mut hint_string = String::new();
+    let mut usage = Vec::new();
 
     for entry in entries {
         if entry.path.is_ident("set") {
@@ -730,6 +736,26 @@ fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
                     })?
                     .to_string(),
             );
+        } else if entry.path.is_ident("usage") {
+            // One or more flag names, OR'd: `usage = PROPERTY_USAGE_STORAGE` keeps a property
+            // out of the inspector but still saved, which the default cannot express.
+            let names: Vec<String> = match &entry.value {
+                syn::Expr::Path(p) => vec![p
+                    .path
+                    .get_ident()
+                    .ok_or_else(|| {
+                        syn::Error::new(p.span(), "usage must be PropertyUsageFlags constants")
+                    })?
+                    .to_string()],
+                syn::Expr::Binary(_) => collect_or_idents(&entry.value)?,
+                other => {
+                    return Err(syn::Error::new(
+                        other.span(),
+                        "usage must be one or more PropertyUsageFlags constants, OR'd with `|`",
+                    ))
+                }
+            };
+            usage = names;
         } else if entry.path.is_ident("hint_string") {
             let syn::Expr::Lit(syn::ExprLit {
                 lit: syn::Lit::Str(text),
@@ -765,7 +791,28 @@ fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
         setter,
         hint,
         hint_string,
+        usage,
     }))
+}
+
+/// Flattens `A | B | C` into the identifiers it names.
+fn collect_or_idents(expr: &syn::Expr) -> syn::Result<Vec<String>> {
+    match expr {
+        syn::Expr::Path(p) => Ok(vec![p
+            .path
+            .get_ident()
+            .ok_or_else(|| syn::Error::new(p.span(), "expected a constant name"))?
+            .to_string()]),
+        syn::Expr::Binary(binary) if matches!(binary.op, syn::BinOp::BitOr(_)) => {
+            let mut left = collect_or_idents(&binary.left)?;
+            left.extend(collect_or_idents(&binary.right)?);
+            Ok(left)
+        }
+        other => Err(syn::Error::new(
+            other.span(),
+            "expected constant names joined with `|`",
+        )),
+    }
 }
 
 /// Derives the property from its getter: `get_speed` returning `f64` becomes the `speed`
@@ -780,6 +827,15 @@ fn parse_property(method: &ImplItemFn, attr: PropAttr) -> syn::Result<Property> 
         None => quote!(0u32),
     };
     let hint_string = attr.hint_string;
+    let usage = if attr.usage.is_empty() {
+        quote!(::godot::godot_core::property_flags::PROPERTY_USAGE_DEFAULT)
+    } else {
+        let flags = attr.usage.iter().map(|name| {
+            let ident = format_ident!("{}", name);
+            quote!(::godot::global::PropertyUsageFlags::#ident.0 as u32)
+        });
+        quote!(#(#flags)|*)
+    };
     let getter = method.sig.ident.to_string();
     let name = getter
         .strip_prefix("get_")
@@ -804,6 +860,7 @@ fn parse_property(method: &ImplItemFn, attr: PropAttr) -> syn::Result<Property> 
         setter,
         hint,
         hint_string,
+        usage,
         variant_type: variant_type_of(ty)?,
     })
 }

@@ -102,6 +102,7 @@ pub unsafe fn register_property<T: GodotClass>(
     property_class: &str,
     hint: u32,
     hint_string: &str,
+    usage: u32,
     setter: &str,
     getter: &str,
 ) {
@@ -118,6 +119,9 @@ pub unsafe fn register_property<T: GodotClass>(
     strings.hint_string = GString::new(hint_string);
     let mut info = strings.info(variant_type);
     info.hint = hint;
+    // Usage decides whether the property is saved, shown, or neither -- a runtime-only value
+    // wants NONE, a hidden-but-saved one STORAGE. The default is saved and shown.
+    info.usage = usage;
 
     sys::interface_fn!(classdb_register_extension_class_property)(
         sys::library(),
