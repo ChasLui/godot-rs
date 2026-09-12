@@ -27,13 +27,26 @@ pub fn catch<R>(context: impl FnOnce() -> String, fallback: R, body: impl FnOnce
             // `context` is a closure so the message is built only when it is needed. Formatting
             // it eagerly would cost an allocation on every call, panic or not, and these sit on
             // the hot path between GDScript and Rust.
-            crate::logging::godot_error(&format!(
-                "Rust panic in {}: {}",
-                context(),
-                describe(&payload)
-            ));
+            let message = format!("Rust panic in {}: {}", context(), describe(&payload));
+            report(&message);
             fallback
         }
+    }
+}
+
+/// Reports `message` through Godot's error output, falling back to stderr.
+///
+/// Reporting can itself panic, and a panic escaping *here* would leave the `catch_unwind` above
+/// and unwind out of the `extern "C"` callback -- exactly the abort this module exists to
+/// prevent. It happens for real: `godot_error` reaches the engine through the interface table,
+/// and Godot calls some callbacks -- freeing an instance, freeing a closure -- during shutdown,
+/// after `sys::deinitialize` has torn that table down. Catching around the report rather than
+/// testing for a live interface also covers the other ways it can fail: an engine too old to
+/// have the utility function, an API hash that does not match, a panic message containing a NUL.
+fn report(message: &str) {
+    if std::panic::catch_unwind(|| crate::logging::godot_error(message)).is_err() {
+        // The error output is gone, so stderr is what is left.
+        eprintln!("{message}");
     }
 }
 
