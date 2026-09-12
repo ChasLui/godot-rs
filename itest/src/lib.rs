@@ -179,6 +179,7 @@ impl RustPluginProbe {
 /// nothing had ever registered one.
 struct RustTestResource {
     payload: i64,
+    base: Base<classes::Resource>,
 }
 
 /// Counts how many `RustTestResource` instances Godot has told us to free.
@@ -208,7 +209,26 @@ impl Drop for RustTestResource {
 #[godot_api(base = Resource)]
 impl RustTestResource {
     fn init() -> Self {
-        Self { payload: 7 }
+        Self {
+            payload: 7,
+            base: Base::unset(),
+        }
+    }
+
+    fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
+        // SAFETY: the engine passes the object this instance was just attached to.
+        self.base = unsafe { Base::new(base) };
+    }
+
+    /// Reaches this object through its own base handle, which is the only way a Rust class can
+    /// call an engine method on itself.
+    ///
+    /// The class name is incidental; the point is that a refcounted class takes a handle to
+    /// itself and lets it go again. Getting the count wrong either frees the caller's object
+    /// early or keeps it alive forever, and the assertions around this call catch both.
+    #[func]
+    fn class_through_base(&mut self) -> GString {
+        self.base.to_gd().get_class()
     }
 
     #[func]
@@ -246,22 +266,30 @@ impl RustTestNode {
 
 /// A Rust class whose base is another Rust class, which the object model cannot support.
 ///
-/// `base = X` is only a name, so this compiles and used to register: the derived object then
-/// carried one Rust state that both classes claimed, and the base class's methods read the
-/// derived class's fields. Registration must refuse it.
+/// `BASE_NAME` is only a name, so this registered once: the derived object then carried one Rust
+/// state that both classes claimed, and the base class's methods read the derived class's fields.
+/// Registration must refuse it.
+///
+/// Written out by hand because `#[godot_api]` can no longer say it -- the macro resolves
+/// `base = X` to `godot::classes::X`, which does not exist for a Rust class. `GodotClass` is a
+/// safe trait anyone can implement, so the registration-time refusal still has to hold.
 struct RustDerivedResource {
+    /// Never read, and that is the hazard: were the class registered, `RustTestResource`'s
+    /// methods would read this field as their own `payload`.
+    #[allow(dead_code)]
     extra: i64,
 }
 
-#[godot_api(base = RustTestResource)]
-impl RustDerivedResource {
+impl GodotClass for RustDerivedResource {
+    const CLASS_NAME: &'static str = "RustDerivedResource";
+    const BASE_NAME: &'static str = "RustTestResource";
+
+    // No type names the intended base, so this is the nearest engine class. The class is refused
+    // over `BASE_NAME` before anything compares the two spellings.
+    type Base = classes::Resource;
+
     fn init() -> Self {
         Self { extra: 42 }
-    }
-
-    #[func]
-    fn extra(&mut self) -> i64 {
-        self.extra
     }
 }
 
@@ -299,7 +327,7 @@ struct RustTestNode {
     counter: i64,
     speed: f64,
     label: GString,
-    base: sys::GDExtensionObjectPtr,
+    base: Base<classes::Node>,
     signal_hits: i64,
     last_signal_value: i64,
     enter_tree_calls: i64,
@@ -324,7 +352,7 @@ impl RustTestNode {
             counter: 0,
             speed: 0.0,
             label: GString::new("unset"),
-            base: std::ptr::null_mut(),
+            base: Base::unset(),
             signal_hits: 0,
             last_signal_value: 0,
             enter_tree_calls: 0,
@@ -386,13 +414,7 @@ impl RustTestNode {
     fn bump_and_emit(&mut self) -> i64 {
         self.counter += 1;
 
-        // SAFETY: `base` is the engine object this instance is attached to, alive for as long
-        // as the instance is.
-        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
-            return -1;
-        };
-
-        match this.emit_signal(
+        match self.base.emit_signal(
             &StringName::new("counter_changed"),
             &[self.counter.to_variant()],
         ) {
@@ -406,10 +428,25 @@ impl RustTestNode {
         }
     }
 
+    /// Which object `base` actually points at, as `"{instance_id},{class_name}"`.
+    ///
+    /// Every other test here would pass just as happily if `base` named some other live object
+    /// of a compatible class -- emitting a signal on the wrong object still emits a signal. This
+    /// is the assertion that says the base is *this* object.
+    #[func]
+    fn base_identity(&mut self) -> GString {
+        GString::new(&format!(
+            "{},{}",
+            self.base.instance_id(),
+            self.base.to_gd().get_class().to_rust_string()
+        ))
+    }
+
     // -- Engine hooks -------------------------------------------------------------------
 
     fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
-        self.base = base;
+        // SAFETY: the engine passes the object this instance was just attached to.
+        self.base = unsafe { Base::new(base) };
     }
 
     /// Only the hot-reload path reaches this, so a sentinel here proves the instance was
@@ -651,9 +688,8 @@ impl RustTestNode {
     /// Builds a `Signal` from an object and a name, and checks the engine agrees about both.
     #[func]
     fn signal_object_and_name(&mut self) -> GString {
-        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
-            return GString::new("<none>");
-        };
+        // A `Gd` rather than a deref: `Signal::from_object_signal` takes the handle itself.
+        let this = self.base.to_gd();
 
         let signal = Signal::from_object_signal(&this, &StringName::new("counter_changed"));
         let name = signal.get_name().to_rust_string();
@@ -878,13 +914,7 @@ impl RustTestNode {
     /// typed slot rather than an untyped one that accepts anything.
     #[prop(set = set_target)]
     fn get_target(&mut self) -> Gd<classes::Node> {
-        // SAFETY: the base object is alive for as long as the engine is calling in.
-        unsafe {
-            self.target
-                .clone()
-                .or_else(|| Gd::<classes::Node>::from_obj_ptr(self.base))
-                .expect("the base object is never null once the engine has set it")
-        }
+        self.target.clone().unwrap_or_else(|| self.base.to_gd())
     }
 
     /// Takes an `Option`, so `node.target = null` clears it instead of being rejected as a
@@ -1030,16 +1060,13 @@ impl RustTestNode {
     /// assertion; there is no wrong value to check for.
     #[func]
     fn fresh_object_survives_the_tree(&mut self) -> bool {
-        let Some(this) = (unsafe { Gd::<classes::Node>::from_obj_ptr(self.base) }) else {
-            return false;
-        };
         let Some(label) = Gd::<classes::Label>::new() else {
             return false;
         };
 
-        this.add_child(label.upcast_ref());
+        self.base.add_child(label.upcast_ref());
         let entered = label.clone().is_inside_tree();
-        this.remove_child(label.upcast_ref());
+        self.base.remove_child(label.upcast_ref());
         // SAFETY: removed from the tree, and this is the only handle left.
         unsafe { label.free() };
 
@@ -1346,10 +1373,6 @@ impl RustTestNode {
     /// the engine really invoked it, with the argument the signal carried.
     #[func]
     fn connect_closure_and_emit(&mut self) -> i64 {
-        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
-            return -1;
-        };
-
         // Shared with the closure; the closure owns one handle, this instance reads the other.
         let seen = std::rc::Rc::new(std::cell::Cell::new(0i64));
         let captured = seen.clone();
@@ -1360,15 +1383,22 @@ impl RustTestNode {
             Variant::nil()
         });
 
-        let err = this.connect(&StringName::new("counter_changed"), &callable);
+        let err = self
+            .base
+            .connect(&StringName::new("counter_changed"), &callable);
         if err != global::Error::OK {
             return -100 - err.ord();
         }
 
-        let _ = this.emit_signal(&StringName::new("counter_changed"), &[3i64.to_variant()]);
-        let _ = this.emit_signal(&StringName::new("counter_changed"), &[4i64.to_variant()]);
+        let _ = self
+            .base
+            .emit_signal(&StringName::new("counter_changed"), &[3i64.to_variant()]);
+        let _ = self
+            .base
+            .emit_signal(&StringName::new("counter_changed"), &[4i64.to_variant()]);
 
-        this.disconnect(&StringName::new("counter_changed"), &callable);
+        self.base
+            .disconnect(&StringName::new("counter_changed"), &callable);
 
         // 3 + 4 if the closure ran for both emits.
         seen.get()
@@ -1408,9 +1438,8 @@ impl RustTestNode {
     /// only GDScript could connect to it. Returns the number of times the handler ran.
     #[func]
     fn connect_and_emit_from_rust(&mut self) -> i64 {
-        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
-            return -1;
-        };
+        // A `Gd` rather than a deref: `Callable::from_object_method` takes the handle itself.
+        let this = self.base.to_gd();
 
         self.signal_hits = 0;
 

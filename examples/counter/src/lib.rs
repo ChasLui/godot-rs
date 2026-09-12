@@ -29,7 +29,7 @@ struct Counter {
     value: i64,
     step: i64,
     /// The engine object this instance is attached to; needed to emit signals on itself.
-    base: sys::GDExtensionObjectPtr,
+    base: Base<classes::Node>,
 }
 
 #[godot_api(base = Node)]
@@ -38,12 +38,13 @@ impl Counter {
         Self {
             value: 0,
             step: 1,
-            base: std::ptr::null_mut(),
+            base: Base::unset(),
         }
     }
 
     fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
-        self.base = base;
+        // SAFETY: the engine passes the object this instance was just attached to.
+        self.base = unsafe { Base::new(base) };
     }
 
     /// Emitted whenever the value changes.
@@ -76,16 +77,17 @@ impl Counter {
     /// Counts up once per frame for `frames` frames, without blocking the game loop.
     #[func]
     fn count_over_frames(&mut self, frame_count: i64) {
-        let base = self.base;
+        // An id rather than the object: the instance may be freed while the future is suspended,
+        // and a pointer to a freed object cannot be told from a live one -- the address may even
+        // have been reused. Resolving the id asks the engine, which knows the object is gone.
+        let id = self.base.instance_id();
         let step = self.step;
 
         AsyncRuntime::spawn(async move {
             for _ in 0..frame_count {
                 next_frame().await;
 
-                // The instance may have been freed while the future was suspended, so the
-                // object is looked up fresh each time rather than captured as a reference.
-                let Some(obj) = (unsafe { Gd::<classes::Object>::from_obj_ptr(base) }) else {
+                let Some(obj) = Gd::<classes::Object>::from_instance_id(id) else {
                     return;
                 };
                 let _ = obj.call(&StringName::new("_advance_by"), &[step.to_variant()]);
@@ -109,10 +111,7 @@ impl Counter {
 
 impl Counter {
     fn notify_changed(&mut self) {
-        let Some(this) = (unsafe { Gd::<classes::Object>::from_obj_ptr(self.base) }) else {
-            return;
-        };
-        let _ = this.emit_signal(
+        let _ = self.base.emit_signal(
             &StringName::new("value_changed"),
             &[self.value.to_variant()],
         );

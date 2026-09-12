@@ -14,6 +14,15 @@ pub trait GodotClass: Sized + 'static {
     /// Name of the engine class to inherit from, e.g. `"Node"` or `"RefCounted"`.
     const BASE_NAME: &'static str;
 
+    /// The same base class as a type.
+    ///
+    /// [`Self::BASE_NAME`] is a string, so nothing checks it until the engine rejects it at
+    /// runtime -- if it rejects it at all. This is the type the compiler can see, and it is what
+    /// a [`Base<Self::Base>`](crate::obj::Base) field is declared with, so a class reaches its
+    /// own engine methods through the class it actually inherits. [`register_class`] refuses a
+    /// class whose two spellings disagree.
+    type Base: crate::obj::GodotObject;
+
     /// Every virtual this class overrides, spelled the way the engine spells it (`_ready`).
     ///
     /// Only used to diagnose names the base class does not have; dispatch itself goes through
@@ -90,8 +99,9 @@ pub trait GodotClass: Sized + 'static {
     /// else. A class needs this to act on itself -- emitting a signal, for instance, is a call
     /// *on the object*, and the Rust state otherwise has no way to reach it.
     ///
-    /// Wrap it with `Gd::from_obj_ptr` to use it; the object outlives the Rust state, so keeping
-    /// the pointer is sound as long as it is not used after `free`.
+    /// Keep it in a [`Base<Self::Base>`](crate::obj::Base) field, which is what makes the
+    /// object's own methods reachable; the object outlives the Rust state, so holding it is sound
+    /// as long as it is not used after `free`.
     fn on_base_ready(&mut self, _base: sys::GDExtensionObjectPtr) {}
 
     /// Declares signals. Called once, right after the class is registered.
@@ -548,6 +558,9 @@ pub unsafe fn register_class<T: GodotClass>() {
     if !base_is_registerable::<T>() {
         return;
     }
+    if !base_type_matches::<T>() {
+        return;
+    }
 
     let class_name = StringName::new(T::CLASS_NAME);
     let base_name = StringName::new(T::BASE_NAME);
@@ -709,6 +722,30 @@ fn base_is_registerable<T: GodotClass>() -> bool {
              methods would read the derived class's fields. Inherit an engine class instead.",
             T::CLASS_NAME,
             T::BASE_NAME,
+        ));
+        return false;
+    }
+    true
+}
+
+/// Whether `T` names the same base class twice.
+///
+/// `#[godot_api]` fills both spellings in from the one `base = X`, so a mismatch can only come
+/// from a hand-written impl -- and it has to be refused rather than picked between. `BASE_NAME`
+/// decides what the engine builds, while [`GodotClass::Base`] decides which methods the class's
+/// own [`Base`](crate::obj::Base) field offers: disagreeing means calling Sprite2D's methods on
+/// an object the engine made a Node.
+fn base_type_matches<T: GodotClass>() -> bool {
+    let as_type = <T::Base as crate::obj::GodotObject>::CLASS_NAME;
+    if as_type != T::BASE_NAME {
+        crate::logging::godot_error(&format!(
+            "{} declares base `{}` but its Base type is {}. The engine would build a {} while \
+             the class called {}'s methods on it. Make the two agree.",
+            T::CLASS_NAME,
+            T::BASE_NAME,
+            as_type,
+            T::BASE_NAME,
+            as_type,
         ));
         return false;
     }

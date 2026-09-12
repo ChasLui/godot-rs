@@ -58,7 +58,7 @@ struct SceneNamePlugin {
     /// A `#[godot_api]` type is the state *behind* an engine object, not the object itself, so
     /// calling an inherited method means holding on to the object. `on_base_ready` is where the
     /// engine hands it over.
-    base: godot::sys::GDExtensionObjectPtr,
+    base: Base<EditorPlugin>,
     label: Option<Gd<Label>>,
 }
 
@@ -66,13 +66,14 @@ struct SceneNamePlugin {
 impl SceneNamePlugin {
     fn init() -> Self {
         Self {
-            base: std::ptr::null_mut(),
+            base: Base::unset(),
             label: None,
         }
     }
 
     fn on_base_ready(&mut self, base: godot::sys::GDExtensionObjectPtr) {
-        self.base = base;
+        // SAFETY: the engine passes the object this instance was just attached to.
+        self.base = unsafe { Base::new(base) };
     }
 
     /// The name on the dock's tab.
@@ -97,7 +98,7 @@ impl SceneNamePlugin {
 
         // `shortcut` defaults to null in Godot, so the short form leaves it out entirely;
         // `add_control_to_dock_ex` takes it as an `Option`.
-        self.plugin()
+        self.base
             .add_control_to_dock(EditorPluginDockSlot(DOCK_SLOT_LEFT_UL), label.upcast_ref());
 
         self.label = Some(label);
@@ -109,7 +110,7 @@ impl SceneNamePlugin {
         // Godot does not free a docked control on its own; the plugin that added it takes it
         // back out and frees it.
         if let Some(label) = self.label.take() {
-            self.plugin().remove_control_from_docks(label.upcast_ref());
+            self.base.remove_control_from_docks(label.upcast_ref());
             // SAFETY: the dock no longer holds it, and this is the only handle left.
             unsafe { label.free() };
         }
@@ -134,16 +135,6 @@ impl SceneNamePlugin {
 }
 
 impl SceneNamePlugin {
-    /// This plugin as an engine handle.
-    fn plugin(&self) -> Gd<EditorPlugin> {
-        // SAFETY: `base` is the object the engine constructed for this instance, and the engine
-        // only calls in while that object is alive.
-        unsafe {
-            Gd::from_obj_ptr(self.base)
-                .expect("the engine sets the base object before it calls any virtual")
-        }
-    }
-
     fn refresh(&mut self) {
         let Some(label) = self.label.as_mut() else {
             return;

@@ -37,7 +37,7 @@ struct Ball {
     /// Corners of the area actually visited, so a caller can tell real motion from jitter.
     travelled_min: Vector2,
     travelled_max: Vector2,
-    base: sys::GDExtensionObjectPtr,
+    base: Base<classes::Node2D>,
 }
 
 #[godot_api(base = Node2D)]
@@ -51,12 +51,13 @@ impl Ball {
             bounces: 0,
             travelled_min: Vector2::new(Real::MAX, Real::MAX),
             travelled_max: Vector2::new(Real::MIN, Real::MIN),
-            base: std::ptr::null_mut(),
+            base: Base::unset(),
         }
     }
 
     fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
-        self.base = base;
+        // SAFETY: the engine passes the object this instance was just attached to.
+        self.base = unsafe { Base::new(base) };
     }
 
     /// Emitted on each wall hit, carrying the running total.
@@ -98,12 +99,9 @@ impl Ball {
     /// Places the ball in the middle of the viewport.
     #[func]
     fn center(&mut self) {
-        let Some(this) = self.as_node2d() else {
-            return;
-        };
         if let Some(bounds) = self.viewport_rect() {
             let middle = bounds.position + bounds.size * 0.5;
-            this.set_position(middle);
+            self.base.set_position(middle);
         }
     }
 
@@ -115,12 +113,14 @@ impl Ball {
     /// The game loop: integrate, bounce off the edges, ask for a redraw.
     #[godot_virtual]
     fn process(&mut self, delta: f64) {
-        let (Some(this), Some(bounds)) = (self.as_node2d(), self.viewport_rect()) else {
+        let Some(bounds) = self.viewport_rect() else {
             return;
         };
 
         let step = (self.speed * delta) as f32;
-        let mut pos = this.get_position() + self.velocity * step;
+        // Each engine call is its own statement: `&*self.base` borrows `*self`, so a handle held
+        // across the field updates below would conflict with writing them.
+        let mut pos = self.base.get_position() + self.velocity * step;
 
         // A viewport can be smaller than the ball -- a headless run reports 64x64 regardless of
         // the project's window size -- which would leave an inverted range to clamp against.
@@ -143,7 +143,7 @@ impl Ball {
             hit = true;
         }
 
-        this.set_position(pos);
+        self.base.set_position(pos);
 
         self.travelled_min.x = self.travelled_min.x.min(pos.x);
         self.travelled_min.y = self.travelled_min.y.min(pos.y);
@@ -156,7 +156,7 @@ impl Ball {
         }
 
         // Position changed, so the drawing is stale.
-        this.queue_redraw();
+        self.base.queue_redraw();
     }
 
     /// Space re-centres the ball, to show input reaching Rust.
@@ -173,24 +173,16 @@ impl Ball {
     /// Godot calls this when the node needs to draw; coordinates are node-local.
     #[godot_virtual]
     fn draw(&mut self) {
-        let Some(this) = self.as_node2d() else {
-            return;
-        };
         let r = match self.viewport_rect() {
             Some(bounds) => self.effective_radius(bounds.size),
             None => self.radius,
         };
-        this.draw_circle(Vector2::ZERO, r, Color::new(0.35, 0.65, 1.0, 1.0));
+        self.base
+            .draw_circle(Vector2::ZERO, r, Color::new(0.35, 0.65, 1.0, 1.0));
     }
 }
 
 impl Ball {
-    /// This node, as the handle its engine methods are called on.
-    fn as_node2d(&self) -> Option<Gd<classes::Node2D>> {
-        // SAFETY: `base` is the object this instance is attached to, alive as long as it is.
-        unsafe { Gd::from_obj_ptr(self.base) }
-    }
-
     /// The radius actually used, never more than a quarter of the smaller viewport side.
     ///
     /// Without this a ball larger than the viewport would have `min > max`, and clamping into an
@@ -202,16 +194,14 @@ impl Ball {
 
     /// The visible area, which the ball is kept inside.
     fn viewport_rect(&self) -> Option<godot::builtin::Rect2> {
-        let this = self.as_node2d()?;
-        let viewport = this.get_viewport()?;
+        let viewport = self.base.get_viewport()?;
         Some(viewport.get_visible_rect())
     }
 
     fn announce_bounce(&mut self) {
-        let Some(this) = self.as_node2d() else {
-            return;
-        };
-        let _ = this.emit_signal(&StringName::new("bounced"), &[self.bounces.to_variant()]);
+        let _ = self
+            .base
+            .emit_signal(&StringName::new("bounced"), &[self.bounces.to_variant()]);
     }
 }
 

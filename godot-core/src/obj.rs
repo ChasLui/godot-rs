@@ -94,6 +94,11 @@ impl<T: GodotObject> Gd<T> {
     /// # Safety
     /// `ptr` must be a live object of class `T` (or a subclass), and the caller must not free it
     /// while this handle is in use.
+    ///
+    /// For a reference-counted `T` the caller also hands over one reference count: this handle
+    /// releases one when it is dropped, whether or not anyone ever took it. Wrapping a borrowed
+    /// pointer therefore frees an object somebody else is still using -- take a count first, the
+    /// way [`Gd::from_instance_id`] and [`Base::to_gd`] do.
     pub unsafe fn from_obj_ptr(ptr: sys::GDExtensionObjectPtr) -> Option<Self> {
         if ptr.is_null() {
             None
@@ -388,6 +393,138 @@ impl<T: GodotObject> std::fmt::Debug for Gd<T> {
     }
 }
 
+/// A user class's handle to the engine object it is attached to.
+///
+/// A `#[godot_api]` type is the state *behind* an engine object, not the object itself, so a
+/// class that wants to act on itself -- emit one of its own signals, read its own name -- has to
+/// hold that object. The engine hands it over once, through
+/// [`on_base_ready`](crate::registry::GodotClass::on_base_ready), and a `Base<T>` field is where
+/// it is kept:
+///
+/// ```ignore
+/// struct Player { base: Base<classes::Node> }
+///
+/// fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
+///     // SAFETY: the engine passes the object this instance was attached to.
+///     self.base = unsafe { Base::new(base) };
+/// }
+/// ```
+///
+/// `Deref` reaches the base class's methods directly (`self.base.get_name()`); [`Base::to_gd`]
+/// produces a [`Gd`] for the places that want the handle itself, such as
+/// [`Signal::from_object_signal`](crate::builtin::Signal::from_object_signal).
+///
+/// # What a `Base` is not
+///
+/// **It never holds a reference count.** An object owning a count on itself is a cycle: the count
+/// could not reach zero, so a refcounted class would never be freed and would need the manual
+/// `free()` these bindings exist to avoid.
+///
+/// For the same reason, **do not store what [`Base::to_gd`] returns in a field of the same
+/// class**. `self.cached = Some(self.base.to_gd())` is that cycle written out. The milder outcome
+/// is the leak above; the worse one is the object reaching zero anyway, because then destruction
+/// drops the class's own fields, and the stored handle releases a count on the object already
+/// being destroyed.
+///
+/// **Do not use it from `Drop`.** The object is being torn down by then, so the pointer is
+/// dangling rather than null and nothing here can detect it.
+///
+/// It is deliberately neither `Clone` nor `Copy`: a `Base` borrowed from `&self` cannot then
+/// outlive the call it was reached in. To keep a reference to the object across frames, store
+/// [`Base::instance_id`] and resolve it with [`Gd::from_instance_id`], which answers `None` once
+/// the object is gone.
+#[repr(transparent)]
+pub struct Base<T: GodotObject> {
+    ptr: sys::GDExtensionObjectPtr,
+    _marker: PhantomData<*mut T>,
+}
+
+impl<T: GodotObject> Base<T> {
+    /// The state a class is in before the engine has handed it its object.
+    ///
+    /// `init` runs before the object exists, so every class starts here. There is deliberately no
+    /// `Default`: the empty state is a real hazard, and spelling it out is what keeps it visible
+    /// at the one place it belongs.
+    pub const fn unset() -> Self {
+        Self {
+            ptr: std::ptr::null_mut(),
+            _marker: PhantomData,
+        }
+    }
+
+    /// Holds on to the object the engine handed this instance.
+    ///
+    /// # Safety
+    /// `ptr` must be the object this Rust state is attached to, of class `T` or a subclass. No
+    /// reference count is taken or transferred -- see the type-level note on why.
+    pub const unsafe fn new(ptr: sys::GDExtensionObjectPtr) -> Self {
+        Self {
+            ptr,
+            _marker: PhantomData,
+        }
+    }
+
+    /// A handle to this object, for the calls that want a [`Gd`] rather than a `&T`.
+    ///
+    /// Panics if the engine has not handed the object over yet; use [`Base::try_to_gd`] where
+    /// that is a real possibility.
+    ///
+    /// The two kinds of base behave differently here, and have to. A `Gd` releases one reference
+    /// count when it is dropped, so a handle to a refcounted object takes one first -- otherwise
+    /// this temporary would release a count the class never owned and free the object while its
+    /// real owner still holds it. A manually-managed base has no count to take, and dropping the
+    /// handle does nothing.
+    pub fn to_gd(&self) -> Gd<T> {
+        self.try_to_gd()
+            .expect("the base object is not set: the engine provides it during construction")
+    }
+
+    /// Like [`Base::to_gd`], but answers `None` before the engine has handed the object over.
+    pub fn try_to_gd(&self) -> Option<Gd<T>> {
+        // SAFETY: the base is borrowed, never owned -- the count belongs to the returned handle,
+        // which releases it again when it is dropped. Null is rejected, and the object outlives
+        // the Rust state attached to it.
+        unsafe { Gd::from_borrowed_obj_ptr(self.ptr) }
+    }
+
+    /// The engine-wide id of this object, which is how it is held across frames.
+    ///
+    /// Panics if the engine has not handed the object over yet.
+    pub fn instance_id(&self) -> u64 {
+        assert!(
+            !self.ptr.is_null(),
+            "the base object is not set: the engine provides it during construction"
+        );
+        // SAFETY: `ptr` is the live object this instance is attached to.
+        unsafe { sys::interface_fn!(object_get_instance_id)(self.ptr) }
+    }
+}
+
+/// Reaching the base class's methods, the same way [`Gd`] does.
+impl<T: GodotObject> std::ops::Deref for Base<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        // Unlike `Gd`, a `Base` has an empty state: `init` runs before the object exists. Calling
+        // an engine method then would hand the engine a null `self`, which it does not check.
+        assert!(
+            !self.ptr.is_null(),
+            "the base object is not set: it arrives during construction, and is gone again by \
+             the time the class is dropped"
+        );
+
+        // SAFETY: `Base` is `repr(transparent)` over the pointer and `T` is zero-sized, so the
+        // reference is in bounds and carries no data of its own.
+        unsafe { &*(self as *const Base<T> as *const T) }
+    }
+}
+
+impl<T: GodotObject> std::fmt::Debug for Base<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Base<{}>({:?})", T::CLASS_NAME, self.ptr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,6 +578,41 @@ mod tests {
         );
 
         // SAFETY: `as_class` came from dereferencing a live `Gd`, which is the contract.
+        let recovered = unsafe { obj_ptr_from_ref(as_class) };
+        assert_eq!(
+            recovered, sentinel,
+            "the object pointer did not survive the round trip"
+        );
+    }
+
+    /// `Base` rests on the same trick as `Gd`, so it has to stay a bare pointer too.
+    #[test]
+    fn base_is_a_bare_pointer() {
+        assert_eq!(
+            std::mem::size_of::<Base<FakeClass>>(),
+            std::mem::size_of::<*mut u8>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Base<FakeClass>>(),
+            std::mem::align_of::<*mut u8>()
+        );
+    }
+
+    /// A field added to `Base` would move the pointer away from offset 0, and `obj_ptr_from_ref`
+    /// would read whatever landed there instead -- through `Deref`, which is safe code.
+    #[test]
+    fn base_deref_lands_on_the_base() {
+        let sentinel = 0x1234_5678_usize as sys::GDExtensionObjectPtr;
+        // SAFETY: the pointer is never dereferenced; only its round trip is checked.
+        let base: Base<FakeClass> = unsafe { Base::new(sentinel) };
+
+        let as_class: &FakeClass = &base;
+        assert_eq!(
+            as_class as *const FakeClass as usize, &base as *const Base<FakeClass> as usize,
+            "Deref moved away from the Base, so obj_ptr_from_ref would read the wrong memory"
+        );
+
+        // SAFETY: `as_class` came from dereferencing a `Base`, which is the same contract.
         let recovered = unsafe { obj_ptr_from_ref(as_class) };
         assert_eq!(
             recovered, sentinel,

@@ -297,6 +297,10 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             const BASE_NAME: &'static str = #base_name;
             const IS_RUNTIME: bool = #is_runtime;
 
+            // Resolving `base = X` as a type is what turns a misspelled or unsupported base into
+            // a compile error instead of a class the engine quietly refuses at startup.
+            type Base = ::godot::classes::#base;
+
             fn init() -> Self {
                 <Self>::init()
             }

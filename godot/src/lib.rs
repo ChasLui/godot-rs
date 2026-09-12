@@ -6,6 +6,7 @@
 //! it makes it a first-class engine class, instantiable from GDScript and the editor.
 //!
 //! ```no_run
+//! use godot::classes::Node;
 //! use godot::prelude::*;
 //!
 //! struct MyLibrary;
@@ -27,18 +28,31 @@
 //!
 //! struct Player {
 //!     health: i64,
+//!     /// The engine object this class is attached to, which is how it acts on itself.
+//!     base: Base<Node>,
 //! }
 //!
 //! #[godot_api(base = Node)]
 //! impl Player {
 //!     fn init() -> Self {
-//!         Self { health: 100 }
+//!         Self { health: 100, base: Base::unset() }
+//!     }
+//!
+//!     /// The engine hands over the object once, right after construction.
+//!     fn on_base_ready(&mut self, base: godot::sys::GDExtensionObjectPtr) {
+//!         // SAFETY: the engine passes the object this instance was just attached to.
+//!         self.base = unsafe { Base::new(base) };
 //!     }
 //!
 //!     /// Exported to GDScript; arguments and return values convert automatically.
 //!     #[func]
 //!     fn take_damage(&mut self, amount: i64) -> i64 {
 //!         self.health -= amount;
+//!         if self.health <= 0 {
+//!             // Emitting one of its own signals is a call *on the object*, so it goes through
+//!             // `base`. A `Gd` is not needed for this -- the base derefs to the class it names.
+//!             let _ = self.base.emit_signal(&StringName::new("died"), &[]);
+//!         }
 //!         self.health
 //!     }
 //!
@@ -60,14 +74,9 @@
 //!     /// An engine hook. The macro also tells Godot the class overrides it.
 //!     #[godot_virtual]
 //!     fn ready(&mut self) {
-//!         godot_print("Player ready");
-//!
-//!         // Engine methods are called on the handle; `get_name` comes from Node, which this
-//!         // class inherits.
-//!         if let Some(node) = Gd::<godot::classes::Node>::new() {
-//!             node.set_name(&StringName::new("Spawned"));
-//!             unsafe { node.free() };
-//!         }
+//!         // `get_name` comes from Node, which this class inherits: inherited methods are called
+//!         // on the base handle, not on `self`.
+//!         godot_print(&format!("{} is ready", self.base.get_name().to_rust_string()));
 //!     }
 //! }
 //!
@@ -110,7 +119,7 @@ pub mod prelude {
     pub use crate::godot_api;
     pub use crate::init::{ExtensionLibrary, InitLevel};
     pub use crate::method::{register_method, MethodDecl};
-    pub use crate::obj::{Gd, GodotObject};
+    pub use crate::obj::{Base, Gd, GodotObject};
     pub use crate::registry::{
         register_class, rust_instance, unregister_class, GodotClass, PropertyDesc,
     };

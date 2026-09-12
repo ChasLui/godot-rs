@@ -16,7 +16,7 @@ const EXPECTED_TESTS := [
 	"panic_is_contained", "previously_untested_apis",
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
-	"refcounted_class",
+	"refcounted_class", "base_object",
 	"virtual_panic", "drop_panic",
 ]
 
@@ -46,6 +46,7 @@ func _ready() -> void:
 	test_refcounted_class()
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
 	test_drop_panic()
+	test_base_object()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
 	call_deferred("start_virtual_test")
 	return
@@ -108,6 +109,15 @@ func test_refcounted_class() -> void:
 	# callback as create_instance3, which owes it an object whose refcount is already claimed.
 	check(res.get_reference_count() == 1,
 		"a fresh Rust Resource has refcount %s, expected 1" % res.get_reference_count())
+
+	# Reaching the object from inside the class must leave the count exactly as it was. A handle
+	# that forgets to take a count frees this object early; one that forgets to release it keeps
+	# the object alive forever, which the leak check at the end of this function catches.
+	check(res.class_through_base() == "RustTestResource",
+		"a Rust class reached the wrong object through its base: %s" % res.class_through_base())
+	check(res.get_reference_count() == 1,
+		"reaching the object through its base left refcount %s, expected 1"
+			% res.get_reference_count())
 
 	# Dropping the last reference must free it: no free() call, and no leak either.
 	res = null
@@ -177,6 +187,27 @@ func test_refcounted_class() -> void:
 			obj.free()
 
 	done("refcounted_class")
+
+func test_base_object() -> void:
+	# The base handle must name *this* object. Every other test would pass just as well if it
+	# named some other live object of a compatible class -- emitting a signal on the wrong
+	# object still emits a signal -- so nothing else here can catch that mistake.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	check(n != null, "could not instantiate RustTestNode")
+	if n == null:
+		return
+
+	var identity: String = n.base_identity()
+	var parts: PackedStringArray = identity.split(",")
+	check(parts.size() == 2, "base_identity returned %s" % identity)
+	if parts.size() == 2:
+		check(parts[0] == str(n.get_instance_id()),
+			"the base names object %s, but the object itself is %s"
+				% [parts[0], n.get_instance_id()])
+		check(parts[1] == "RustTestNode", "the base object is a %s" % parts[1])
+
+	n.free()
+	done("base_object")
 
 func test_virtuals() -> void:
 	var parts: PackedStringArray = str(virtual_node.virtual_counts()).split(",")
