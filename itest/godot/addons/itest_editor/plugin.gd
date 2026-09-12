@@ -6,14 +6,28 @@ extends EditorPlugin
 
 var failures: Array[String] = []
 
+# A GDScript runtime error -- calling a method that does not exist, say -- aborts the enclosing
+# function without aborting the script, so every later assertion in it is silently skipped and an
+# empty `failures` list reads as success. Each test records that it reached its end, the same way
+# the game-mode suite does; a test that never got there is a failure even if it accused nobody.
+var completed: Array[String] = []
+const EXPECTED_TESTS := ["editor_only_class", "rust_editor_plugin", "hot_reload"]
+
 func check(condition: bool, message: String) -> void:
 	if not condition:
 		failures.append(message)
+
+func done(name: String) -> void:
+	completed.append(name)
 
 func _enter_tree() -> void:
 	test_editor_only_class()
 	test_rust_editor_plugin()
 	test_hot_reload()
+
+	for name in EXPECTED_TESTS:
+		if not completed.has(name):
+			failures.append("test '%s' did not run to completion (a script error aborted it)" % name)
 
 	if failures.is_empty():
 		print("itest-editor: OK")
@@ -31,6 +45,8 @@ func test_editor_only_class() -> void:
 		check(n != null and n.marker() == 1, "editor-only class did not work")
 		if n != null:
 			n.free()
+
+	done("editor_only_class")
 
 func test_rust_editor_plugin() -> void:
 	# A Rust EditorPlugin is added through editor_add_plugin, not through a plugin.cfg, so
@@ -52,6 +68,8 @@ func test_rust_editor_plugin() -> void:
 	# The plugin descends from EditorPlugin, and that is what makes it one.
 	check(ClassDB.is_parent_class("RustTestPlugin", "EditorPlugin"),
 		"RustTestPlugin does not descend from EditorPlugin")
+
+	done("rust_editor_plugin")
 
 func test_hot_reload() -> void:
 	# Reloading is only enabled in an editor build, and only for an extension whose
@@ -91,3 +109,5 @@ func test_hot_reload() -> void:
 	check(again.echo_int(42) == 42, "the reloaded instance could not answer a method call")
 
 	again.free()
+
+	done("hot_reload")

@@ -5,8 +5,11 @@
 //! path a real user's code takes.
 
 use godot::builtin::{
-    Callable, Color, Dictionary, NodePath, PackedByteArray, PackedFloat32Array, PackedStringArray,
-    Signal, Transform2D, TypedArray, VariantArray, Vector2, Vector3,
+    Basis, Callable, Color, Dictionary, NodePath, PackedByteArray, PackedColorArray,
+    PackedFloat32Array, PackedFloat64Array, PackedInt32Array, PackedInt64Array, PackedStringArray,
+    PackedVector2Array, PackedVector3Array, PackedVector4Array, Plane, Projection, Quaternion,
+    Rect2, Rect2i, Rid, Signal, Transform2D, TypedArray, VariantArray, Vector2, Vector2i, Vector3,
+    Vector3i, Vector4,
 };
 use godot::classes;
 use godot::global;
@@ -1570,6 +1573,309 @@ impl RustTestNode {
             total += sa.len();
         }
         total
+    }
+
+    // -- Global utility functions -------------------------------------------------------
+
+    /// Draws from the engine's random number generator, which GDScript seeds on the other side
+    /// of this call.
+    ///
+    /// The sharpest question the utility bindings can be asked. A binding that quietly used a
+    /// Rust generator would return a number here too -- just never the one the engine's own
+    /// generator is about to produce from the same seed.
+    #[func]
+    fn util_randi(&mut self) -> i64 {
+        global::randi()
+    }
+
+    /// Seeds that same generator from Rust, so the sharing is checked in both directions.
+    /// A utility function returning nothing takes a different path than one that does.
+    #[func]
+    fn util_seed(&mut self, value: i64) {
+        global::seed(value);
+    }
+
+    /// `str`, which is variadic *and* returns a value.
+    ///
+    /// Whether the engine is handed a return slot follows the declared return type, not the
+    /// variadic flag: `str`, `max` and `min` write to that slot unconditionally, while the
+    /// equally variadic `print` never touches one. Passing null to the first would have the
+    /// engine write through a null pointer, so these three are covered separately.
+    #[func]
+    fn util_str(&mut self, a: Variant, b: Variant) -> GString {
+        global::str(&[a, b])
+    }
+
+    #[func]
+    fn util_max(&mut self, a: Variant, b: Variant, c: Variant) -> Variant {
+        global::max(&[a, b, c])
+    }
+
+    #[func]
+    fn util_min(&mut self, a: Variant, b: Variant, c: Variant) -> Variant {
+        global::min(&[a, b, c])
+    }
+
+    /// `print` with no arguments at all, then with one.
+    ///
+    /// Godot's description gives `print` a named argument `arg1` alongside the variadic flag.
+    /// Keeping it as a Rust parameter would have made `print()` -- valid GDScript -- impossible
+    /// to express, which is why the generator folds it into `varargs`.
+    #[func]
+    fn util_print(&mut self) -> bool {
+        global::print(&[]);
+        global::print(&[GString::new(
+            "  (the blank line above and this one come from Rust's global::print)",
+        )
+        .to_variant()]);
+        true
+    }
+
+    /// `type_convert`, with the type tag supplied by GDScript so both sides are known to be
+    /// naming the same type rather than each using its own numbering.
+    #[func]
+    fn util_type_convert(&mut self, value: Variant, type_tag: i64) -> Variant {
+        global::type_convert(&value, type_tag)
+    }
+
+    /// The text and binary serialisation round trips, over a value GDScript chooses.
+    ///
+    /// Returns `[var_to_str(value), str_to_var(that text), var_to_bytes(value).size(),
+    /// bytes_to_var(those bytes)]`, so each half can be compared against GDScript's own.
+    #[func]
+    fn util_var_roundtrip(&mut self, value: Variant) -> VariantArray {
+        let text = global::var_to_str(&value);
+        let bytes = global::var_to_bytes(&value);
+
+        let mut out = VariantArray::new();
+        out.push(&text.to_variant());
+        out.push(&global::str_to_var(&text));
+        out.push(&bytes.len().to_variant());
+        out.push(&global::bytes_to_var(&bytes));
+        out
+    }
+
+    /// Operations whose Godot definition a hand-written Rust equivalent would silently miss.
+    ///
+    /// Returns `[posmod(-5, 3), lerp_angle(0, 3, 0.25), snapped(0.37, 0.1), pingpong(5, 3),
+    /// -5 % 3]`. The last entry is Rust's own remainder on the same inputs: it is there so the
+    /// check can assert the two really differ rather than trusting that they do.
+    #[func]
+    fn util_semantics(&mut self) -> VariantArray {
+        let mut out = VariantArray::new();
+        out.push(&global::posmod(-5, 3).to_variant());
+        out.push(&global::lerp_angle(0.0, 3.0, 0.25).to_variant());
+        out.push(&global::snapped(
+            &0.37f64.to_variant(),
+            &0.1f64.to_variant(),
+        ));
+        out.push(&global::pingpong(5.0, 3.0).to_variant());
+        out.push(&(-5i64 % 3).to_variant());
+        out
+    }
+
+    /// `is_instance_valid` across a `free`, as `"before,after"`.
+    ///
+    /// The Variant still carries the object it was built from, so a check that only looked for
+    /// nil would answer true both times.
+    #[func]
+    fn util_is_instance_valid(&mut self) -> GString {
+        let Some(node) = Gd::<classes::Node>::new() else {
+            return GString::new("<none>");
+        };
+
+        let as_variant = node.to_variant();
+        let before = global::is_instance_valid(&as_variant);
+
+        // SAFETY: Node is not reference-counted and this is the only handle.
+        unsafe { node.free() };
+        let after = global::is_instance_valid(&as_variant);
+
+        GString::new(&format!("{before},{after}"))
+    }
+
+    // -- The remaining packed arrays ----------------------------------------------------
+
+    /// One of each `Packed*Array` the suite never touched, in the order GDScript checks them.
+    ///
+    /// Every element differs in every component: these arrays hold their elements as raw memory,
+    /// so a wrong element width or field order scrambles the values rather than failing loudly.
+    #[func]
+    fn make_packed_arrays(&mut self) -> VariantArray {
+        let mut colors = PackedColorArray::new();
+        colors.push_back(Color::new(0.25, 0.5, 0.75, 1.0));
+        colors.push_back(Color::new(1.0, 0.0, 0.5, 0.25));
+
+        let mut floats = PackedFloat64Array::new();
+        floats.push_back(1.5);
+        floats.push_back(-2.25);
+        // A value no 32-bit float can hold, so a truncated element type shows up as a mismatch.
+        floats.push_back(1e300);
+
+        let mut ints32 = PackedInt32Array::new();
+        ints32.push_back(7);
+        ints32.push_back(i64::from(i32::MIN));
+
+        let mut ints64 = PackedInt64Array::new();
+        ints64.push_back(-9);
+        // Beyond 32 bits, so a narrowed element type cannot round-trip it.
+        ints64.push_back(i64::MAX);
+
+        let mut v2 = PackedVector2Array::new();
+        v2.push_back(Vector2::new(1.0, 2.0));
+        v2.push_back(Vector2::new(-3.0, 4.5));
+
+        let mut v3 = PackedVector3Array::new();
+        v3.push_back(Vector3::new(1.0, 2.0, 3.0));
+        v3.push_back(Vector3::new(-4.0, 5.5, -6.0));
+
+        let mut v4 = PackedVector4Array::new();
+        v4.push_back(Vector4::new(1.0, 2.0, 3.0, 4.0));
+        v4.push_back(Vector4::new(-5.0, 6.5, -7.0, 8.0));
+
+        let mut out = VariantArray::new();
+        out.push(&colors.to_variant());
+        out.push(&floats.to_variant());
+        out.push(&ints32.to_variant());
+        out.push(&ints64.to_variant());
+        out.push(&v2.to_variant());
+        out.push(&v3.to_variant());
+        out.push(&v4.to_variant());
+        out
+    }
+
+    // -- The remaining flat math builtins -----------------------------------------------
+
+    /// One value of each flat math builtin the suite never exercised, keyed by name.
+    ///
+    /// Built field by *name* rather than through `new`, following the same reasoning as the unit
+    /// test in `builtin::math`: a constructor takes its arguments in declaration order, so it
+    /// would follow a reordering of the fields and hide exactly the mistake this looks for.
+    /// Every field gets a distinct value for the same reason.
+    #[func]
+    fn make_math_values(&mut self) -> Dictionary {
+        let mut d = Dictionary::new();
+
+        d.set(
+            &"vector2i".to_variant(),
+            &Vector2i { x: 1, y: -2 }.to_variant(),
+        );
+        d.set(
+            &"vector3i".to_variant(),
+            &Vector3i { x: 3, y: -4, z: 5 }.to_variant(),
+        );
+        d.set(
+            &"vector4".to_variant(),
+            &Vector4 {
+                x: 1.5,
+                y: -2.5,
+                z: 3.5,
+                w: -4.5,
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"rect2".to_variant(),
+            &Rect2 {
+                position: Vector2 { x: 1.5, y: 2.5 },
+                size: Vector2 { x: 3.5, y: 4.5 },
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"rect2i".to_variant(),
+            &Rect2i {
+                position: Vector2i { x: 5, y: 6 },
+                size: Vector2i { x: 7, y: 8 },
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"basis".to_variant(),
+            &Basis {
+                x: Vector3 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                },
+                y: Vector3 {
+                    x: 4.0,
+                    y: 5.0,
+                    z: 6.0,
+                },
+                z: Vector3 {
+                    x: 7.0,
+                    y: 8.0,
+                    z: 9.0,
+                },
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"quaternion".to_variant(),
+            &Quaternion {
+                x: 0.5,
+                y: -0.5,
+                z: 0.5,
+                w: 0.5,
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"plane".to_variant(),
+            &Plane {
+                normal: Vector3 {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 1.0,
+                },
+                d: 5.5,
+            }
+            .to_variant(),
+        );
+        d.set(
+            &"projection".to_variant(),
+            &Projection {
+                x: Vector4 {
+                    x: 1.0,
+                    y: 2.0,
+                    z: 3.0,
+                    w: 4.0,
+                },
+                y: Vector4 {
+                    x: 5.0,
+                    y: 6.0,
+                    z: 7.0,
+                    w: 8.0,
+                },
+                z: Vector4 {
+                    x: 9.0,
+                    y: 10.0,
+                    z: 11.0,
+                    w: 12.0,
+                },
+                w: Vector4 {
+                    x: 13.0,
+                    y: 14.0,
+                    z: 15.0,
+                    w: 16.0,
+                },
+            }
+            .to_variant(),
+        );
+
+        d
+    }
+
+    /// The handle inside a `Rid` the engine issued.
+    ///
+    /// A Rid names a resource owned by one of the servers and means nothing outside it, so the
+    /// value comes from GDScript rather than being invented here. Returning the id rather than
+    /// the Rid makes the check asymmetric: a layout mistake on the way in cannot be undone by
+    /// the same mistake on the way out.
+    #[func]
+    fn rid_id(&mut self, rid: Rid) -> i64 {
+        rid.id as i64
     }
 
     // -- Object lifetime ----------------------------------------------------------------

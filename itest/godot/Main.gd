@@ -17,7 +17,7 @@ const EXPECTED_TESTS := [
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
 	"refcounted_class", "base_object",
-	"virtual_panic", "drop_panic",
+	"utility_functions", "packed_arrays", "math_types", "virtual_panic", "drop_panic",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -42,6 +42,9 @@ func _ready() -> void:
 	test_previously_untested_apis()
 	test_math_builtins()
 	test_collections()
+	test_utility_functions()
+	test_packed_arrays()
+	test_math_types()
 	test_virtual_panic()
 	test_refcounted_class()
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
@@ -226,6 +229,10 @@ func test_virtuals() -> void:
 	if extra.size() == 3:
 		check(int(extra[0]) == 1, "_enter_tree fired %s times, expected 1" % extra[0])
 		check(int(extra[1]) == 0, "_exit_tree fired %s times before removal, expected 0" % extra[1])
+		# A headless run has no input device, so _input must not have fired at all. Asserting
+		# zero is weaker than asserting a real event count, but it still catches the virtual
+		# being invoked with something that is not an event.
+		check(int(extra[2]) == 0, "_input fired %s times in a headless run, expected 0" % extra[2])
 
 	# The virtual-return path with an owned builtin. No engine virtual returning one can be
 	# triggered from a running game, so the Rust side stands in for the engine and builds the
@@ -875,6 +882,212 @@ func test_reference_counting() -> void:
 
 	n.free()
 	done("reference_counting")
+
+func test_utility_functions() -> void:
+	# Godot's global functions -- the ones GDScript calls without a receiver. Every check here
+	# compares against GDScript performing the same call, so "returned something" is never
+	# mistaken for "returned the right thing".
+	var n: Object = ClassDB.instantiate("RustTestNode")
+
+	# The engine has one random number generator, and these bindings must draw from it. Seeding
+	# it here and drawing from Rust has to give exactly what GDScript draws from the same seed;
+	# a binding using a generator of its own would answer with a number too, just never this one.
+	seed(42)
+	var from_rust: int = n.util_randi()
+	seed(42)
+	var from_gdscript: int = randi()
+	check(from_rust == from_gdscript,
+		"randi() gave %d through Rust and %d in GDScript from the same seed; the two are not "
+			% [from_rust, from_gdscript] + "sharing the engine's generator")
+
+	# The same generator, seeded from the Rust side this time.
+	n.util_seed(42)
+	var after_rust_seed: int = randi()
+	check(after_rust_seed == from_gdscript,
+		"seed() called from Rust then randi() in GDScript gave %d, expected the same %d"
+			% [after_rust_seed, from_gdscript])
+
+	# str/max/min are variadic *and* return a value. That combination decides whether the engine
+	# is handed a return slot: these three write to it unconditionally, while the equally
+	# variadic print() never touches one.
+	var joined: String = n.util_str(1, "x")
+	check(joined == str(1, "x"),
+		"str(1, \"x\") gave %s through Rust, GDScript gives %s" % [joined, str(1, "x")])
+	var largest = n.util_max(3, 9, -1)
+	check(largest == 9, "max(3, 9, -1) gave %s through Rust, expected 9" % [largest])
+	var smallest = n.util_min(3, 9, -1)
+	check(smallest == -1, "min(3, 9, -1) gave %s through Rust, expected -1" % [smallest])
+
+	# print() with no arguments at all. Godot's API description gives print a named argument
+	# alongside its variadic flag; keeping that as a Rust parameter would have made this call
+	# impossible to write.
+	check(n.util_print(), "print() with no arguments did not return")
+
+	# type_convert, with the tag passed in from here so both sides are known to be naming the
+	# same type rather than each using its own numbering.
+	var converted = n.util_type_convert("42", TYPE_INT)
+	check(converted == type_convert("42", TYPE_INT),
+		"type_convert(\"42\", TYPE_INT) gave %s through Rust, GDScript gives %s"
+			% [converted, type_convert("42", TYPE_INT)])
+
+	# The two serialisation round trips, text and binary, over a nested value.
+	var value := {"answer": 42, "list": [1, 2.5, "three"]}
+	var trip: Array = n.util_var_roundtrip(value)
+	check(trip.size() == 4, "util_var_roundtrip returned %d entries, expected 4" % trip.size())
+	if trip.size() == 4:
+		check(trip[0] == var_to_str(value),
+			"var_to_str gave %s through Rust, GDScript gives %s" % [trip[0], var_to_str(value)])
+		check(trip[1] == value,
+			"str_to_var did not restore the value, got %s" % [trip[1]])
+		check(trip[2] == var_to_bytes(value).size(),
+			"var_to_bytes produced %s bytes through Rust, GDScript produces %d"
+				% [trip[2], var_to_bytes(value).size()])
+		check(trip[3] == value,
+			"bytes_to_var did not restore the value, got %s" % [trip[3]])
+
+	# Semantics a hand-written Rust equivalent would quietly get wrong.
+	var sem: Array = n.util_semantics()
+	check(sem.size() == 5, "util_semantics returned %d entries, expected 5" % sem.size())
+	if sem.size() == 5:
+		check(sem[0] == posmod(-5, 3),
+			"posmod(-5, 3) gave %s through Rust, GDScript gives %s" % [sem[0], posmod(-5, 3)])
+		check(sem[4] == -2, "Rust's own -5 %% 3 came back as %s, expected -2" % [sem[4]])
+		# If these ever agreed, posmod would be indistinguishable from Rust's remainder and the
+		# check above would prove nothing.
+		check(sem[0] != sem[4],
+			"posmod and Rust's own remainder both gave %s, so this comparison proves nothing"
+				% [sem[0]])
+		check(is_equal_approx(sem[1], lerp_angle(0.0, 3.0, 0.25)),
+			"lerp_angle(0, 3, 0.25) gave %s through Rust, GDScript gives %s"
+				% [sem[1], lerp_angle(0.0, 3.0, 0.25)])
+		check(is_equal_approx(sem[2], snapped(0.37, 0.1)),
+			"snapped(0.37, 0.1) gave %s through Rust, GDScript gives %s"
+				% [sem[2], snapped(0.37, 0.1)])
+		check(is_equal_approx(sem[3], pingpong(5.0, 3.0)),
+			"pingpong(5, 3) gave %s through Rust, GDScript gives %s"
+				% [sem[3], pingpong(5.0, 3.0)])
+
+	# is_instance_valid has to notice the object is gone. The Variant still names it, so a check
+	# that only looked for nil would answer true both times.
+	check(n.util_is_instance_valid() == "true,false",
+		"is_instance_valid before and after free() gave %s, expected true,false"
+			% n.util_is_instance_valid())
+
+	n.free()
+	done("utility_functions")
+
+func test_packed_arrays() -> void:
+	# Seven of the ten Packed* types had no coverage at all. Each is built in Rust and read back
+	# here element by element: they store their elements as raw memory, so a wrong element width
+	# scrambles values rather than failing loudly.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	var arrays: Array = n.make_packed_arrays()
+	check(arrays.size() == 7, "make_packed_arrays returned %d entries, expected 7" % arrays.size())
+	if arrays.size() != 7:
+		n.free()
+		return
+
+	var colors = arrays[0]
+	check(typeof(colors) == TYPE_PACKED_COLOR_ARRAY,
+		"the colour array came back as type %d, expected TYPE_PACKED_COLOR_ARRAY" % typeof(colors))
+	check(colors.size() == 2, "PackedColorArray has %d elements, expected 2" % colors.size())
+	check(colors[0].is_equal_approx(Color(0.25, 0.5, 0.75, 1.0)),
+		"PackedColorArray[0] is %s, expected (0.25, 0.5, 0.75, 1)" % [colors[0]])
+	check(colors[1].is_equal_approx(Color(1.0, 0.0, 0.5, 0.25)),
+		"PackedColorArray[1] is %s, expected (1, 0, 0.5, 0.25)" % [colors[1]])
+
+	var floats = arrays[1]
+	check(typeof(floats) == TYPE_PACKED_FLOAT64_ARRAY,
+		"the float array came back as type %d, expected TYPE_PACKED_FLOAT64_ARRAY" % typeof(floats))
+	check(floats.size() == 3, "PackedFloat64Array has %d elements, expected 3" % floats.size())
+	check(floats[0] == 1.5 and floats[1] == -2.25,
+		"PackedFloat64Array holds %s, expected 1.5 and -2.25" % [floats])
+	# No 32-bit float can hold this, so a narrowed element type shows up as inf here.
+	check(floats[2] == 1e300, "PackedFloat64Array[2] is %s, expected 1e+300" % [floats[2]])
+
+	var ints32 = arrays[2]
+	check(typeof(ints32) == TYPE_PACKED_INT32_ARRAY,
+		"the int32 array came back as type %d, expected TYPE_PACKED_INT32_ARRAY" % typeof(ints32))
+	check(ints32.size() == 2, "PackedInt32Array has %d elements, expected 2" % ints32.size())
+	check(ints32[0] == 7 and ints32[1] == -2147483648,
+		"PackedInt32Array holds %s, expected 7 and -2147483648" % [ints32])
+
+	var ints64 = arrays[3]
+	check(typeof(ints64) == TYPE_PACKED_INT64_ARRAY,
+		"the int64 array came back as type %d, expected TYPE_PACKED_INT64_ARRAY" % typeof(ints64))
+	check(ints64.size() == 2, "PackedInt64Array has %d elements, expected 2" % ints64.size())
+	# The second value needs all 64 bits, so a narrowed element type cannot round-trip it.
+	check(ints64[0] == -9 and ints64[1] == 9223372036854775807,
+		"PackedInt64Array holds %s, expected -9 and i64::MAX" % [ints64])
+
+	var v2 = arrays[4]
+	check(typeof(v2) == TYPE_PACKED_VECTOR2_ARRAY,
+		"the Vector2 array came back as type %d, expected TYPE_PACKED_VECTOR2_ARRAY" % typeof(v2))
+	check(v2.size() == 2, "PackedVector2Array has %d elements, expected 2" % v2.size())
+	check(v2[0] == Vector2(1, 2) and v2[1] == Vector2(-3, 4.5),
+		"PackedVector2Array holds %s, expected (1, 2) and (-3, 4.5)" % [v2])
+
+	var v3 = arrays[5]
+	check(typeof(v3) == TYPE_PACKED_VECTOR3_ARRAY,
+		"the Vector3 array came back as type %d, expected TYPE_PACKED_VECTOR3_ARRAY" % typeof(v3))
+	check(v3.size() == 2, "PackedVector3Array has %d elements, expected 2" % v3.size())
+	check(v3[0] == Vector3(1, 2, 3) and v3[1] == Vector3(-4, 5.5, -6),
+		"PackedVector3Array holds %s, expected (1, 2, 3) and (-4, 5.5, -6)" % [v3])
+
+	var v4 = arrays[6]
+	check(typeof(v4) == TYPE_PACKED_VECTOR4_ARRAY,
+		"the Vector4 array came back as type %d, expected TYPE_PACKED_VECTOR4_ARRAY" % typeof(v4))
+	check(v4.size() == 2, "PackedVector4Array has %d elements, expected 2" % v4.size())
+	check(v4[0] == Vector4(1, 2, 3, 4) and v4[1] == Vector4(-5, 6.5, -7, 8),
+		"PackedVector4Array holds %s, expected (1, 2, 3, 4) and (-5, 6.5, -7, 8)" % [v4])
+
+	n.free()
+	done("packed_arrays")
+
+func test_math_types() -> void:
+	# The flat math builtins nothing had exercised. They cross the boundary as raw memory, so
+	# every field is given a distinct value: a wrong field order or element width shows up as
+	# scrambled numbers rather than as a crash.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	var v: Dictionary = n.make_math_values()
+
+	check(v["vector2i"] == Vector2i(1, -2),
+		"Vector2i came back as %s, expected (1, -2)" % [v["vector2i"]])
+	check(v["vector3i"] == Vector3i(3, -4, 5),
+		"Vector3i came back as %s, expected (3, -4, 5)" % [v["vector3i"]])
+	check(v["vector4"] == Vector4(1.5, -2.5, 3.5, -4.5),
+		"Vector4 came back as %s, expected (1.5, -2.5, 3.5, -4.5)" % [v["vector4"]])
+	check(v["rect2"] == Rect2(Vector2(1.5, 2.5), Vector2(3.5, 4.5)),
+		"Rect2 came back as %s, expected position (1.5, 2.5) size (3.5, 4.5)" % [v["rect2"]])
+	check(v["rect2i"] == Rect2i(Vector2i(5, 6), Vector2i(7, 8)),
+		"Rect2i came back as %s, expected position (5, 6) size (7, 8)" % [v["rect2i"]])
+	check(v["quaternion"].is_equal_approx(Quaternion(0.5, -0.5, 0.5, 0.5)),
+		"Quaternion came back as %s, expected (0.5, -0.5, 0.5, 0.5)" % [v["quaternion"]])
+	check(v["plane"] == Plane(Vector3(0, 0, 1), 5.5),
+		"Plane came back as %s, expected normal (0, 0, 1) d 5.5" % [v["plane"]])
+	check(v["projection"] == Projection(
+			Vector4(1, 2, 3, 4), Vector4(5, 6, 7, 8),
+			Vector4(9, 10, 11, 12), Vector4(13, 14, 15, 16)),
+		"Projection came back as %s, expected its columns counting 1 to 16" % [v["projection"]])
+
+	# Basis is the one type whose Rust fields and GDScript members are not the same thing: the
+	# engine stores three rows, which is what the Rust struct's x, y and z are, while GDScript's
+	# .x, .y and .z are the *columns*. Rust filling rows (1,2,3), (4,5,6), (7,8,9) therefore has
+	# to read back here as the transpose -- any other answer means the memory is wrong.
+	check(v["basis"] == Basis(Vector3(1, 4, 7), Vector3(2, 5, 8), Vector3(3, 6, 9)),
+		"a Basis whose Rust rows are (1,2,3), (4,5,6), (7,8,9) came back as %s, expected its "
+			% [v["basis"]] + "transpose, since GDScript names the columns x/y/z")
+
+	# A RID the engine issued, rather than one invented here: a RID is meaningless outside the
+	# server that owns it. Rust reads the handle out of it and hands back the plain number, so a
+	# layout mistake on the way in cannot be undone by the same mistake on the way out.
+	var rid := get_viewport().get_viewport_rid()
+	check(rid.is_valid(), "the viewport RID is invalid, so this check proves nothing")
+	check(n.rid_id(rid) == rid.get_id(),
+		"a RID read in Rust has id %d, GDScript sees %d" % [n.rid_id(rid), rid.get_id()])
+
+	n.free()
+	done("math_types")
 
 func test_virtual_panic() -> void:
 	# A panic inside a virtual leaves Rust by a different route than one inside a #[func]: the
