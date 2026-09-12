@@ -264,7 +264,9 @@ Built and covered by the integration tests:
   the type confusion.
 - Editor classes are behind the `editor` feature and off by default, since an extension that
   references them fails to load in an exported project
-- Windows, Android and iOS are not covered by CI
+- Android and iOS are not covered by CI. Linux, macOS and Windows all run the
+  integration tests; the lint, unit-test, doc and example jobs run on Linux only, so a
+  platform-specific `cfg` is checked by `clippy` on one platform and by the engine on three
 - No API compatibility with the `gdnative` crate — Godot 3 code must be rewritten
 
 ## Development

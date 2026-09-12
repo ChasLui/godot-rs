@@ -11,12 +11,34 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
 
 - `godot-sys`: bindgen over the vendored `gdextension_interface.h`, plus the interface function
   table resolved through `get_proc_address`
-- `godot-codegen` / `godot-bindings`: bindings generated from `extension_api.json`
+- `godot-codegen` / `godot-bindings`: bindings generated from `extension_api.json` -- every
+  non-editor class, and all 114 of Godot's global utility functions (`lerp`, `randi`,
+  `type_convert`, `is_instance_valid`, ...) as free functions in `global`
 - `godot-core`: `Variant`, builtin types, `Gd<T>` with reference counting, class registration,
-  `ptrcall`/varcall
+  `ptrcall`/varcall, and `Base<T>`, the handle a class uses to act on the object it is attached
+  to -- previously a raw `GDExtensionObjectPtr` field every class had to keep and wrap by hand
 - `godot-macros`: `#[godot_api]` with `#[func]`, `#[prop]`, `#[signal]`, `#[godot_virtual]`
 - `godot-async`: frame-driven executor
 - `itest`: integration tests that run inside a real Godot instance
+
+### Fixed
+
+- Panics in user code no longer cross the FFI boundary. Twelve callbacks could still unwind out
+  of an `extern "C"` function -- the entry point, the instance and closure destructors, the
+  property-list callbacks, the ptrcall argument conversion -- and unwinding out of one aborts the
+  editor in practice, taking unsaved work with it.
+- Reporting a panic could itself panic, and that one had nowhere left to go. The report reaches
+  Godot through the interface table, which engine shutdown tears down before it makes its last
+  calls into the extension; it now falls back to stderr rather than aborting.
+- A virtual method's object argument no longer frees the object it was given. The argument is
+  borrowed -- the engine drops the event once the frame is over -- but the handle wrapped it as
+  though it had been handed a reference count, so a reference-counted argument such as an
+  `InputEvent` was destroyed the moment `_input` returned, while the engine was still using it.
+  Nothing caught it because a headless run has no input device, so the virtual had never once
+  been called; the test that now covers it pushes an event of its own.
+- A class whose `Base<T>` field names a different class than its `#[godot_api(base = ...)]` is
+  refused at registration. The base was only ever a name, so the two could disagree and the class
+  would call one class's methods on an object the engine built as another.
 
 ### Removed
 

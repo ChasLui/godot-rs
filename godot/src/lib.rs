@@ -92,7 +92,8 @@
 //!   on a [`Gd`](obj::Gd) handle: `node.add_child(&child)`.
 //! - [`builtin`] -- `Variant` and the types it can hold: strings, vectors, arrays, callables.
 //! - [`obj`] -- [`Gd<T>`](obj::Gd), the handle to an engine object.
-//! - [`global`] -- engine enums and constants.
+//! - [`global`] -- engine enums, and the utility functions GDScript calls without a
+//!   receiver: `lerp`, `randi`, `type_convert`, `is_instance_valid`.
 //! - [`task`] -- futures driven by the frame loop.
 //!
 //! # What is not here
