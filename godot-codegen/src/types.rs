@@ -432,3 +432,227 @@ fn parse_call_args(name: &str, raw: &str) -> Option<Vec<f64>> {
         .map(|part| part.trim().parse::<f64>().ok())
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Nothing in these tests is a class, unless a test says otherwise.
+    fn no_classes(_: &str) -> bool {
+        false
+    }
+
+    fn no_global_enums(_: &str) -> bool {
+        false
+    }
+
+    fn map(godot_type: &str, meta: Option<&str>) -> Option<RustTy> {
+        map_type_with(godot_type, meta, &no_classes, &no_global_enums)
+    }
+
+    /// The width `meta` asks for is the width ptrcall reads. Widening an `int32` to `i64` makes
+    /// the engine and the binding disagree about how many bytes the argument occupies, which
+    /// corrupts silently rather than failing.
+    #[test]
+    fn integer_meta_pins_the_width() {
+        assert_eq!(map("int", Some("int32")), Some(RustTy::Primitive("i32")));
+        assert_eq!(map("int", Some("uint8")), Some(RustTy::Primitive("u8")));
+        assert_eq!(map("int", Some("int64")), Some(RustTy::Primitive("i64")));
+        // No meta means the dump did not narrow it, and Godot's `int` is 64-bit.
+        assert_eq!(map("int", None), Some(RustTy::Primitive("i64")));
+    }
+
+    #[test]
+    fn float_meta_pins_the_width() {
+        assert_eq!(map("float", Some("float")), Some(RustTy::Primitive("f32")));
+        assert_eq!(map("float", Some("double")), Some(RustTy::Primitive("f64")));
+        assert_eq!(map("float", None), Some(RustTy::Primitive("f64")));
+    }
+
+    /// A width nobody has taught the generator about must drop the method, not guess. Guessing
+    /// is the one outcome that produces a binding which compiles and marshals wrongly.
+    #[test]
+    fn an_unknown_meta_is_refused() {
+        assert_eq!(map("int", Some("int128")), None);
+        assert_eq!(map("float", Some("half")), None);
+    }
+
+    /// `Variant.Type` is spelled like a class-scoped enum but is declared globally, so the dot
+    /// has to be dropped rather than split on.
+    #[test]
+    fn a_global_enum_keeps_no_owner() {
+        let is_global = |name: &str| name == "Variant.Type";
+        assert_eq!(
+            map_type_with("enum::Variant.Type", None, &no_classes, &is_global),
+            Some(RustTy::Enum {
+                name: "VariantType".to_string(),
+                owner: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_class_scoped_enum_keeps_its_owner() {
+        assert_eq!(
+            map("enum::Node.ProcessMode", None),
+            Some(RustTy::Enum {
+                name: "ProcessMode".to_string(),
+                owner: Some("Node".to_string()),
+            })
+        );
+    }
+
+    #[test]
+    fn a_bitfield_is_an_enum_too() {
+        assert_eq!(
+            map("bitfield::PropertyUsageFlags", None),
+            Some(RustTy::Enum {
+                name: "PropertyUsageFlags".to_string(),
+                owner: None,
+            })
+        );
+    }
+
+    #[test]
+    fn a_typed_array_resolves_its_element() {
+        assert_eq!(
+            map("typedarray::PackedByteArray", None),
+            Some(RustTy::TypedArray(Box::new(RustTy::Builtin(
+                "PackedByteArray"
+            ))))
+        );
+    }
+
+    /// `TypedArray<()>` and `TypedArray<SomeEnum>` are not types the bindings can express, so
+    /// the whole method goes rather than a half-usable signature.
+    #[test]
+    fn a_typed_array_of_something_unusable_is_refused() {
+        assert_eq!(map("typedarray::void", None), None);
+        assert_eq!(map("typedarray::enum::Error", None), None);
+    }
+
+    /// The API dump does not describe what these point at, so the binding passes the pointer
+    /// through and the method is generated `unsafe`.
+    #[test]
+    fn a_pointer_type_requires_unsafe() {
+        let ty = map("const uint8_t*", None).expect("pointers map");
+        assert_eq!(ty, RustTy::RawPointer);
+        assert!(ty.requires_unsafe());
+        assert!(!RustTy::Primitive("i64").requires_unsafe());
+    }
+
+    /// Anything unrecognised is a class name, and a name that is not a class either has no
+    /// binding at all.
+    #[test]
+    fn an_unknown_name_falls_through_to_the_class_list() {
+        let is_class = |name: &str| name == "Node";
+        assert_eq!(
+            map_type_with("Node", None, &is_class, &no_global_enums),
+            Some(RustTy::Object("Node".to_string()))
+        );
+        assert_eq!(
+            map_type_with("NotAThing", None, &is_class, &no_global_enums),
+            None
+        );
+    }
+
+    /// Objects and the heap-backed builtins are passed by reference; the flat maths types are
+    /// `Copy` and are passed by value, so a caller does not clone at every call site.
+    #[test]
+    fn only_the_non_copy_types_are_taken_by_reference() {
+        assert!(RustTy::Builtin("GString").is_by_ref());
+        assert!(RustTy::Object("Node".to_string()).is_by_ref());
+        assert!(RustTy::Variant.is_by_ref());
+        assert!(!RustTy::Builtin("Vector2").is_by_ref());
+        assert!(!RustTy::Builtin("Rid").is_by_ref());
+        assert!(!RustTy::Primitive("f32").is_by_ref());
+    }
+
+    #[test]
+    fn rust_keywords_are_escaped_and_nothing_else_is() {
+        assert_eq!(rust_safe_name("typeof"), "typeof_");
+        assert_eq!(rust_safe_name("type"), "type_");
+        assert_eq!(rust_safe_name("move"), "move_");
+        assert_eq!(rust_safe_name("lerp"), "lerp");
+        assert_eq!(rust_safe_name("print_verbose"), "print_verbose");
+    }
+
+    fn default_expr(ty: &RustTy, raw: &str) -> Option<String> {
+        default_value_expr(ty, raw).map(|tokens| tokens.to_string())
+    }
+
+    /// `TokenStream::to_string` separates tokens with spaces, so a negative literal reads
+    /// `- 1i8`. The spacing is not what these tests are about.
+    fn default_expr_compact(ty: &RustTy, raw: &str) -> Option<String> {
+        default_expr(ty, raw).map(|text| text.replace(' ', ""))
+    }
+
+    /// The literal carries the target width, so the call site needs no cast. Emitting `-1i64`
+    /// where an `i8` is wanted would not compile.
+    #[test]
+    fn an_integer_default_is_a_literal_of_its_own_width() {
+        assert_eq!(
+            default_expr_compact(&RustTy::Primitive("i8"), "-1"),
+            Some("-1i8".to_string())
+        );
+        assert_eq!(
+            default_expr_compact(&RustTy::Primitive("u32"), "7"),
+            Some("7u32".to_string())
+        );
+    }
+
+    /// Godot writes some float defaults without a decimal point, so the text cannot simply be
+    /// passed through to Rust.
+    #[test]
+    fn a_float_default_without_a_point_still_parses() {
+        assert_eq!(
+            default_expr_compact(&RustTy::Primitive("f32"), "-1"),
+            Some("-1f32".to_string())
+        );
+        assert_eq!(
+            default_expr_compact(&RustTy::Primitive("f64"), "0.5"),
+            Some("0.5f64".to_string())
+        );
+    }
+
+    #[test]
+    fn a_bool_default_takes_only_the_two_words() {
+        assert_eq!(
+            default_expr(&RustTy::Primitive("bool"), "true"),
+            Some("true".to_string())
+        );
+        assert_eq!(default_expr(&RustTy::Primitive("bool"), "1"), None);
+    }
+
+    /// `&""` is how the dump spells an empty StringName, and the ampersand is not part of the
+    /// string.
+    #[test]
+    fn a_string_name_default_drops_the_ampersand() {
+        let expr = default_expr(&RustTy::Builtin("StringName"), "&\"\"").expect("maps");
+        assert!(expr.contains("StringName :: new"), "{expr}");
+        assert!(expr.contains("\"\""), "{expr}");
+    }
+
+    #[test]
+    fn a_vector_default_is_read_out_of_its_constructor_call() {
+        let expr = default_expr(&RustTy::Builtin("Vector2i"), "Vector2i(1, 2)").expect("maps");
+        assert!(expr.contains("Vector2i :: new"), "{expr}");
+        assert!(expr.contains("1i32"), "{expr}");
+        assert!(expr.contains("2i32"), "{expr}");
+    }
+
+    /// A default the generator cannot express drops the short form only; the method itself is
+    /// still generated with its full argument list.
+    #[test]
+    fn an_unparsable_default_is_refused_rather_than_guessed() {
+        assert_eq!(
+            default_expr(&RustTy::Object("Node".to_string()), "null"),
+            None
+        );
+        assert_eq!(default_expr(&RustTy::Builtin("Dictionary"), "{}"), None);
+        assert_eq!(
+            default_expr(&RustTy::Builtin("Vector2"), "Vector2(1)"),
+            None
+        );
+    }
+}
