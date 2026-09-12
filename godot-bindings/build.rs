@@ -11,10 +11,12 @@ fn main() {
     // Coverage is reported rather than silently capped: the skipped count is the honest
     // measure of how much of the engine API these bindings do not expose yet.
     println!(
-        "cargo:warning=godot-bindings: {} classes, {} methods generated, {} methods skipped (unsupported types or virtual){}",
+        "cargo:warning=godot-bindings: {} classes, {} methods generated, {} methods skipped (unsupported types or virtual), {} utility functions generated, {} skipped{}",
         generated.class_count,
         generated.method_count,
         generated.skipped_methods,
+        generated.utility_count,
+        generated.skipped_utilities,
         if include_editor { ", editor classes included" } else { "" }
     );
 

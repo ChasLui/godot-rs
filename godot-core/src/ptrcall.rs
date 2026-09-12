@@ -231,6 +231,60 @@ impl MethodBind {
     }
 }
 
+/// A Godot utility function -- `sin`, `randi`, `print`, ... -- resolved once and cached.
+///
+/// These are not in ClassDB, so there is no class to look them up under: the key is
+/// `(name, hash)` alone. The call itself follows the same ptrcall convention as a bound method,
+/// which is why the return value is marshalled by the same [`PtrcallRet`].
+pub struct UtilityBind {
+    ptr: sys::GDExtensionPtrUtilityFunction,
+}
+
+// The pointer is engine-owned, immutable, and valid for the process lifetime once resolved.
+unsafe impl Send for UtilityBind {}
+unsafe impl Sync for UtilityBind {}
+
+impl UtilityBind {
+    /// # Safety
+    /// Only valid after the extension is initialized.
+    pub unsafe fn resolve(name: &str, hash: i64) -> Self {
+        let name_sn = StringName::new(name);
+
+        let ptr = sys::interface_fn!(variant_get_ptr_utility_function)(
+            name_sn.as_ptr(),
+            hash as sys::GDExtensionInt,
+        );
+
+        assert!(
+            ptr.is_some(),
+            "utility function `{name}` (hash {hash}) not found -- \
+             the engine's API does not match the one these bindings were generated from"
+        );
+
+        Self { ptr }
+    }
+
+    /// # Safety
+    /// `args` must match the function's signature: one pointer per argument, each to the
+    /// declared type's native representation. For a variadic function every argument is a
+    /// `Variant`, and `R` must be what the function actually returns -- a function that writes
+    /// its result unconditionally (`str`, `max`, `min`) corrupts nothing only because `R` is not
+    /// `()` there.
+    pub unsafe fn call<R: PtrcallRet>(&self, args: &[sys::GDExtensionConstTypePtr]) -> R {
+        let func = self.ptr.expect("utility function pointer was null");
+
+        // An empty slice yields a dangling pointer. Godot reads the argument array even for
+        // zero-argument functions such as `randi`, so it must be null instead.
+        let args_ptr = if args.is_empty() {
+            std::ptr::null()
+        } else {
+            args.as_ptr()
+        };
+
+        R::from_ptrcall(|ret| func(ret, args_ptr, args.len() as i32))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

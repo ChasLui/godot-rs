@@ -75,6 +75,10 @@ pub struct UtilityFunction {
     pub is_vararg: bool,
     #[serde(default)]
     pub arguments: Vec<Argument>,
+    /// Godot's own prose, in BBCode. Carried through to the generated doc comment, since these
+    /// functions have no other documentation on the Rust side.
+    #[serde(default)]
+    pub description: String,
 }
 
 #[derive(Deserialize)]

@@ -7,6 +7,7 @@
 pub mod api;
 pub mod builtins;
 pub mod types;
+pub mod utilities;
 
 use api::{Api, Class};
 use proc_macro2::TokenStream;
@@ -31,6 +32,8 @@ pub struct Generated {
     pub class_count: usize,
     pub method_count: usize,
     pub skipped_methods: usize,
+    pub utility_count: usize,
+    pub skipped_utilities: usize,
 }
 
 pub fn generate(api_json_path: &str) -> Generated {
@@ -77,6 +80,8 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
     let class_enums = generate_class_enums(&api, &class_map, &enum_owners);
     let singletons = generate_singletons(&api, &selected);
     let global_enums = generate_global_enums(&api);
+    let (utility_fns, utility_count, skipped_utilities) =
+        utilities::generate_utility_functions(&api, &is_class, &is_global_enum, &selected);
 
     let version = &api.header.version_full_name;
     let precision = &api.header.precision;
@@ -92,6 +97,7 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
 
         pub mod global {
             #global_enums
+            #utility_fns
         }
 
         pub mod classes {
@@ -108,6 +114,8 @@ pub fn generate_with(api_json_path: &str, include_editor: bool) -> Generated {
         class_count: ordered.len(),
         method_count,
         skipped_methods,
+        utility_count,
+        skipped_utilities,
     }
 }
 
@@ -189,7 +197,7 @@ fn generate_class(
 ///
 /// Has to recurse: a `TypedArray<Gd<Foo>>` is unusable if `Foo` is outside the generated set,
 /// even though the type at the top level is a builtin.
-fn all_classes_available(ty: &RustTy, selected: &HashSet<&str>) -> bool {
+pub(crate) fn all_classes_available(ty: &RustTy, selected: &HashSet<&str>) -> bool {
     match ty {
         RustTy::Object(name) => selected.contains(name.as_str()),
         RustTy::TypedArray(elem) => all_classes_available(elem, selected),
@@ -821,8 +829,30 @@ fn syn_free_format(text: &str) -> Option<String> {
     let mut out = String::with_capacity(text.len() * 2);
     let mut depth = 0usize;
 
+    // Inside a string literal a brace or a semicolon is text, not structure. Godot's own prose
+    // is carried through into doc attributes and is full of both -- breaking a line in the middle
+    // of one turns the literal into something rustdoc reads as an unparseable Rust code block.
+    let mut in_string = false;
+    let mut escaped = false;
+
     for ch in text.chars() {
+        if in_string {
+            out.push(ch);
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
         match ch {
+            '"' => {
+                in_string = true;
+                out.push(ch);
+            }
             '{' => {
                 depth += 1;
                 out.push_str("{\n");
