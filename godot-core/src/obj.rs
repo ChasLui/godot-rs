@@ -105,6 +105,23 @@ impl<T: GodotObject> Gd<T> {
         }
     }
 
+    /// Wraps an object pointer the caller does *not* own a reference count for.
+    ///
+    /// [`Gd::from_obj_ptr`] takes over a count the caller already holds. A borrowed pointer --
+    /// a virtual method's object argument, or the object a class is attached to -- comes with no
+    /// count to take over, so one is taken here. Without it the handle releases, when it drops, a
+    /// count it never owned, and the object is freed while its real owner is still using it.
+    ///
+    /// # Safety
+    /// `ptr` must be null or a live object of class `T` (or a subclass).
+    pub(crate) unsafe fn from_borrowed_obj_ptr(ptr: sys::GDExtensionObjectPtr) -> Option<Self> {
+        if T::IS_REFCOUNTED && !ptr.is_null() {
+            let _: bool = refcount_methods().reference.ptrcall(ptr, &[]);
+        }
+
+        Self::from_obj_ptr(ptr)
+    }
+
     pub fn as_obj_ptr(&self) -> sys::GDExtensionObjectPtr {
         self.ptr
     }

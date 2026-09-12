@@ -29,7 +29,11 @@ unsafe extern "C" fn initialize_level<E: ExtensionLibrary>(
     level: sys::GDExtensionInitializationLevel,
 ) {
     if let Some(level) = InitLevel::from_sys(level) {
-        E::on_level_init(level);
+        crate::panics::catch(
+            || format!("on_level_init({level:?})"),
+            (),
+            || E::on_level_init(level),
+        );
     }
 }
 
@@ -41,7 +45,15 @@ unsafe extern "C" fn deinitialize_level<E: ExtensionLibrary>(
         return;
     };
 
-    E::on_level_deinit(level);
+    // Only the user hook is caught, deliberately: `sys::deinitialize` below must run even when
+    // the hook panicked. Skipping it would leave the binding in place, and the next reload would
+    // then trip the "initialized twice" assertion in the entry point -- turning one contained
+    // panic into a failure to load at all.
+    crate::panics::catch(
+        || format!("on_level_deinit({level:?})"),
+        (),
+        || E::on_level_deinit(level),
+    );
 
     // Levels are torn down in reverse, so Core is the last callback the extension receives.
     // Releasing the binding here is what makes a reload work: the engine calls the entry point
@@ -60,18 +72,28 @@ pub unsafe fn entry_point<E: ExtensionLibrary>(
     library: sys::GDExtensionClassLibraryPtr,
     initialization: *mut sys::GDExtensionInitialization,
 ) -> sys::GDExtensionBool {
-    if initialization.is_null() {
-        return false as sys::GDExtensionBool;
-    }
+    // Above this frame is Godot's loader, so a panic here has nowhere to unwind to and takes the
+    // process with it. It is a reachable panic, not a theoretical one: `sys::initialize` asserts
+    // the binding is not already set, which a previous teardown that did not finish would leave
+    // it. Answering false makes that a "failed to load extension" message instead of a crash.
+    crate::panics::catch(
+        || "the extension entry point".to_string(),
+        false as sys::GDExtensionBool,
+        || {
+            if initialization.is_null() {
+                return false as sys::GDExtensionBool;
+            }
 
-    sys::initialize(get_proc_address, library);
+            sys::initialize(get_proc_address, library);
 
-    (*initialization).minimum_initialization_level = E::min_level().to_sys();
-    (*initialization).userdata = std::ptr::null_mut();
-    (*initialization).initialize = Some(initialize_level::<E>);
-    (*initialization).deinitialize = Some(deinitialize_level::<E>);
+            (*initialization).minimum_initialization_level = E::min_level().to_sys();
+            (*initialization).userdata = std::ptr::null_mut();
+            (*initialization).initialize = Some(initialize_level::<E>);
+            (*initialization).deinitialize = Some(deinitialize_level::<E>);
 
-    true as sys::GDExtensionBool
+            true as sys::GDExtensionBool
+        },
+    )
 }
 
 /// Declares the `#[no_mangle]` entry function Godot looks up via `entry_symbol`.

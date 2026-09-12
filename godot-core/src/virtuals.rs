@@ -95,11 +95,15 @@ impl_from_arg_direct!(
     crate::builtin::Rid,
 );
 
-// An object argument arrives as the object pointer itself.
+// An object argument arrives as the object pointer itself, and the engine keeps owning it: the
+// event handed to `_input` belongs to the caller, which drops it once the frame is over. Taking a
+// count is what keeps this handle from freeing it early -- `InputEvent` is reference-counted, so
+// without one the object dies the moment the virtual returns, in the middle of the engine's own
+// use of it.
 unsafe impl<T: crate::obj::GodotObject> FromPtrcallArg for Option<crate::obj::Gd<T>> {
     unsafe fn from_arg(ptr: sys::GDExtensionConstTypePtr) -> Self {
         let obj = std::ptr::read(ptr as *const sys::GDExtensionObjectPtr);
-        crate::obj::Gd::from_obj_ptr(obj)
+        crate::obj::Gd::from_borrowed_obj_ptr(obj)
     }
 }
 
@@ -142,14 +146,23 @@ pub(crate) unsafe extern "C" fn get_virtual_call_data<T: GodotClass>(
     name: sys::GDExtensionConstStringNamePtr,
     _hash: u32,
 ) -> *mut std::ffi::c_void {
-    let name = StringName::from_sys_copy(name).to_rust_string();
+    // Null already means "not overridden", so it doubles as the fallback: a class that cannot be
+    // asked about a virtual simply does not get called for it, which is the quiet failure mode
+    // rather than the loud one.
+    crate::panics::catch(
+        || format!("{}::get_virtual_call_data", T::CLASS_NAME),
+        std::ptr::null_mut(),
+        || {
+            let name = StringName::from_sys_copy(name).to_rust_string();
 
-    match T::virtual_trampoline(&name) {
-        // The trampoline pointer *is* the token; Godot only ever hands it back.
-        Some(f) => f as *mut std::ffi::c_void,
-        // Null tells Godot this class does not override the method, so it stops asking.
-        None => std::ptr::null_mut(),
-    }
+            match T::virtual_trampoline(&name) {
+                // The trampoline pointer *is* the token; Godot only ever hands it back.
+                Some(f) => f as *mut std::ffi::c_void,
+                // Null tells Godot this class does not override the method, so it stops asking.
+                None => std::ptr::null_mut(),
+            }
+        },
+    )
 }
 
 pub(crate) unsafe extern "C" fn call_virtual_with_data(

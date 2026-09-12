@@ -176,8 +176,21 @@ unsafe extern "C" fn create_instance<T: GodotClass>(
         None => return std::ptr::null_mut(),
     };
 
-    // Give the instance its own object before anything can call into it.
-    (*instance).on_base_ready(object);
+    // Give the instance its own object before anything can call into it. Caught separately from
+    // `init` above because the Box already exists by now: returning null while still holding the
+    // raw pointer would lose it outright, so the state is reclaimed first.
+    let ready = crate::panics::catch(
+        || format!("{}::on_base_ready", T::CLASS_NAME),
+        false,
+        || {
+            (*instance).on_base_ready(object);
+            true
+        },
+    );
+    if !ready {
+        drop(Box::from_raw(instance));
+        return std::ptr::null_mut();
+    }
 
     sys::interface_fn!(object_set_instance)(
         object,
@@ -215,7 +228,14 @@ unsafe extern "C" fn free_instance<T: GodotClass>(
     if instance.is_null() {
         return;
     }
-    drop(Box::from_raw(instance as *mut T));
+    // A user `Drop` runs here, and Godot calls this during shutdown as well as during play.
+    // The Box's own drop glue still deallocates while unwinding, so a panic leaks at most the
+    // fields that had not been dropped yet -- nothing the caller could act on, hence `()`.
+    crate::panics::catch(
+        || format!("{}::drop", T::CLASS_NAME),
+        (),
+        || drop(Box::from_raw(instance as *mut T)),
+    );
 }
 
 /// Godot calls this when an extension is hot-reloaded: the engine object survives, the
@@ -223,14 +243,44 @@ unsafe extern "C" fn free_instance<T: GodotClass>(
 ///
 /// Wired up from the start because it belongs to the same ABI struct as create/free; filling in
 /// the body later must not require reshaping the object model.
+///
+/// Returning null does not mean the same thing here as in [`create_instance`]. There the object
+/// never escaped, so nothing is left behind; here the engine object is already alive and in the
+/// scene, and null leaves it permanently without Rust state -- every later callback sees a null
+/// instance and returns early, so the object stays in place and answers nothing. That is the
+/// deliberate trade: a reload only happens in the editor, and an inert object with a loud error
+/// beside it costs less than an abort that takes unsaved work with it.
 unsafe extern "C" fn recreate_instance<T: GodotClass>(
     _class_userdata: *mut std::ffi::c_void,
     object: sys::GDExtensionObjectPtr,
 ) -> sys::GDExtensionClassInstancePtr {
-    let instance = Box::into_raw(Box::new(T::init()));
-    (*instance).on_base_ready(object);
-    // Lets a test tell a rebuilt instance from one that merely kept its state.
-    (*instance).on_recreated();
+    let instance = match crate::panics::catch(
+        || format!("{}::init", T::CLASS_NAME),
+        None,
+        || Some(Box::into_raw(Box::new(T::init()))),
+    ) {
+        Some(ptr) => ptr,
+        None => return std::ptr::null_mut(),
+    };
+
+    // The hooks are caught apart from `init` so the Box can be reclaimed: past `into_raw` the
+    // only pointer to the state is this local, and returning null without freeing it would be a
+    // plain leak.
+    let ready = crate::panics::catch(
+        || format!("{}::on_recreated", T::CLASS_NAME),
+        false,
+        || {
+            (*instance).on_base_ready(object);
+            // Lets a test tell a rebuilt instance from one that merely kept its state.
+            (*instance).on_recreated();
+            true
+        },
+    );
+    if !ready {
+        drop(Box::from_raw(instance));
+        return std::ptr::null_mut();
+    }
+
     instance as sys::GDExtensionClassInstancePtr
 }
 
@@ -333,14 +383,28 @@ unsafe extern "C" fn get_property_list<T: GodotClass>(
         return std::ptr::null();
     }
 
-    let mut strings = Vec::with_capacity(descs.len());
-    for desc in &descs {
-        strings.push((
-            StringName::new(&desc.name),
-            StringName::new(""),
-            GString::new(&desc.hint_string),
-        ));
-    }
+    // Building the strings is user input meeting the engine: a property name containing a NUL
+    // makes `StringName::new` panic, and it panics here rather than inside the user's method.
+    let Some(mut strings) = crate::panics::catch(
+        || format!("{}::get_property_list", T::CLASS_NAME),
+        None,
+        || {
+            Some(
+                descs
+                    .iter()
+                    .map(|desc| {
+                        (
+                            StringName::new(&desc.name),
+                            StringName::new(""),
+                            GString::new(&desc.hint_string),
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        },
+    ) else {
+        return std::ptr::null();
+    };
 
     let infos: Vec<sys::GDExtensionPropertyInfo> = descs
         .iter()
@@ -384,9 +448,19 @@ unsafe extern "C" fn free_property_list(
         return;
     }
     // Dropping the storage releases both the array and the strings it points into.
-    PROPERTY_LISTS.with(|lists| {
-        lists.borrow_mut().remove(&(list as usize));
-    });
+    //
+    // `PROPERTY_LISTS` is thread-local, and the engine releases lists during shutdown, so this
+    // can run while the thread's TLS is being destroyed -- `with` panics outright once that has
+    // happened. The storage is gone in that case anyway, which is what the callback was for.
+    crate::panics::catch(
+        || "free_property_list".to_string(),
+        (),
+        || {
+            PROPERTY_LISTS.with(|lists| {
+                lists.borrow_mut().remove(&(list as usize));
+            });
+        },
+    );
 }
 
 /// How many property lists the engine has asked for and not yet released.
@@ -421,21 +495,26 @@ unsafe extern "C" fn get_property<T: GodotClass>(
     if instance.is_null() {
         return false as sys::GDExtensionBool;
     }
-    let this = &mut *(instance as *mut T);
-    let name = StringName::from_sys_copy(name).to_rust_string();
-
-    match crate::panics::catch(
+    // One catch around the whole exchange, not just the user method: reading the name out of the
+    // engine and writing the answer back both go through the interface table, which is gone once
+    // the extension has been deinitialized. Reporting "not mine" is the honest answer when any
+    // part of that fails.
+    crate::panics::catch(
         || format!("{}::get", T::CLASS_NAME),
-        None,
-        || this.godot_get(&name),
-    ) {
-        Some(value) => {
-            // The engine's slot is uninitialized and takes ownership of what is written.
-            value.move_into(ret);
-            true as sys::GDExtensionBool
-        }
-        None => false as sys::GDExtensionBool,
-    }
+        false,
+        || {
+            let this = &mut *(instance as *mut T);
+            let name = StringName::from_sys_copy(name).to_rust_string();
+            match this.godot_get(&name) {
+                Some(value) => {
+                    // The engine's slot is uninitialized and takes ownership of what is written.
+                    value.move_into(ret);
+                    true
+                }
+                None => false,
+            }
+        },
+    ) as sys::GDExtensionBool
 }
 
 unsafe extern "C" fn set_property<T: GodotClass>(
@@ -446,14 +525,17 @@ unsafe extern "C" fn set_property<T: GodotClass>(
     if instance.is_null() {
         return false as sys::GDExtensionBool;
     }
-    let this = &mut *(instance as *mut T);
-    let name = StringName::from_sys_copy(name).to_rust_string();
-    let value = crate::builtin::Variant::from_sys_copy(value);
-
+    // Copying the name and the value out of the engine is inside the catch for the same reason
+    // as in `get_property`: both reach the engine through the interface table.
     crate::panics::catch(
         || format!("{}::set", T::CLASS_NAME),
         false,
-        || this.godot_set(&name, &value),
+        || {
+            let this = &mut *(instance as *mut T);
+            let name = StringName::from_sys_copy(name).to_rust_string();
+            let value = crate::builtin::Variant::from_sys_copy(value);
+            this.godot_set(&name, &value)
+        },
     ) as sys::GDExtensionBool
 }
 

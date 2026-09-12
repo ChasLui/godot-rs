@@ -83,38 +83,50 @@ unsafe extern "C" fn method_call<T: GodotClass>(
         return;
     }
 
-    // The engine owns the argument Variants for the duration of the call; copy them so the
-    // Rust side works with ordinary owned values.
-    let mut owned_args = Vec::with_capacity(arg_count as usize);
-    for i in 0..arg_count as usize {
-        owned_args.push(Variant::from_sys_copy(*args.add(i)));
-    }
-
-    // A static method gets no instance, and the signature says so rather than inventing one:
-    // a `&mut T` pointing at nothing would be undefined behaviour even where nothing reads it.
-    let this = if userdata.is_static {
-        None
-    } else {
-        Some(&mut *(instance as *mut T))
-    };
+    // Copying the arguments is inside the catch, not before it: `from_sys_copy` goes through the
+    // interface table and the Variant types it reads are whatever the caller passed.
     let result = crate::panics::catch(
         || format!("{}::{}", T::CLASS_NAME, userdata.name),
         Ok(Variant::nil()),
-        || (userdata.func)(this, &owned_args),
+        || {
+            // The engine owns the argument Variants for the duration of the call; copy them so
+            // the Rust side works with ordinary owned values.
+            let mut owned_args = Vec::with_capacity(arg_count as usize);
+            for i in 0..arg_count as usize {
+                owned_args.push(Variant::from_sys_copy(*args.add(i)));
+            }
+
+            // A static method gets no instance, and the signature says so rather than inventing
+            // one: a `&mut T` pointing at nothing would be undefined behaviour even where
+            // nothing reads it.
+            let this = if userdata.is_static {
+                None
+            } else {
+                Some(&mut *(instance as *mut T))
+            };
+            (userdata.func)(this, &owned_args)
+        },
     );
 
-    match result {
-        Ok(value) => {
-            value.move_into(r_return);
-            (*r_error).error = sys::GDExtensionCallErrorType_GDEXTENSION_CALL_OK;
-        }
-        Err(bad) => {
-            (*r_error).error =
-                sys::GDExtensionCallErrorType_GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT;
-            (*r_error).argument = bad.index;
-            (*r_error).expected = bad.expected as i32;
-        }
-    }
+    // Answering the engine gets its own catch rather than joining the one above, because
+    // `r_return` is uninitialized storage the callee is required to fill: skipping the write
+    // would leave the engine destroying garbage, which is worse than the panic being reported.
+    crate::panics::catch(
+        || format!("{}::{} (returning)", T::CLASS_NAME, userdata.name),
+        (),
+        || match result {
+            Ok(value) => {
+                value.move_into(r_return);
+                (*r_error).error = sys::GDExtensionCallErrorType_GDEXTENSION_CALL_OK;
+            }
+            Err(bad) => {
+                (*r_error).error =
+                    sys::GDExtensionCallErrorType_GDEXTENSION_CALL_ERROR_INVALID_ARGUMENT;
+                (*r_error).argument = bad.index;
+                (*r_error).expected = bad.expected as i32;
+            }
+        },
+    );
 }
 
 /// Owns the strings a `GDExtensionPropertyInfo` points at.
@@ -188,52 +200,64 @@ unsafe extern "C" fn method_ptrcall<T: GodotClass>(
         return;
     }
 
-    let mut owned_args = Vec::with_capacity(userdata.arg_count as usize);
-    for (i, arg) in userdata.args.iter().enumerate() {
-        let ptr = *args.add(i);
-        owned_args.push(
-            if arg.variant_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
-                // A `Variant` argument is already one; there is nothing to rebuild.
-                Variant::from_sys_copy(ptr as sys::GDExtensionConstVariantPtr)
-            } else {
-                Variant::from_builtin(arg.variant_type, ptr as sys::GDExtensionTypePtr)
-            },
-        );
-    }
-
-    let this = if userdata.is_static {
-        None
-    } else {
-        Some(&mut *(instance as *mut T))
-    };
-
-    let result = crate::panics::catch(
+    // The catch spans the whole call, not just the user's method: rebuilding an argument from
+    // its native representation trusts the type the method was registered with to be the one the
+    // engine is actually passing, and converting the return value trusts the same thing in
+    // reverse. Both panic when they disagree, and both sit outside the user's code.
+    //
+    // Leaving the return slot untouched after a panic is safe here, unlike on the varcall path:
+    // the engine default-constructs it before the call, so the caller reads that default rather
+    // than uninitialized memory.
+    crate::panics::catch(
         || format!("{}::{}", T::CLASS_NAME, userdata.name),
-        Ok(Variant::nil()),
-        || (userdata.func)(this, &owned_args),
-    );
+        (),
+        || {
+            let mut owned_args = Vec::with_capacity(userdata.arg_count as usize);
+            for (i, arg) in userdata.args.iter().enumerate() {
+                let ptr = *args.add(i);
+                owned_args.push(
+                    if arg.variant_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL
+                    {
+                        // A `Variant` argument is already one; there is nothing to rebuild.
+                        Variant::from_sys_copy(ptr as sys::GDExtensionConstVariantPtr)
+                    } else {
+                        Variant::from_builtin(arg.variant_type, ptr as sys::GDExtensionTypePtr)
+                    },
+                );
+            }
 
-    // A method declared as returning nothing is given no slot to write into.
-    let (Some(ret_type), false) = (userdata.ret, r_return.is_null()) else {
-        return;
-    };
-    let value = result.unwrap_or_else(|_| Variant::nil());
-    if ret_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
-        value.move_into(r_return as sys::GDExtensionVariantPtr);
-    } else {
-        // The engine constructs this slot before the call -- `VariantInternal::initialize` on
-        // the declared type -- but the conversion that writes into it is a placement new,
-        // documented as taking "uninitialized memory". Writing straight over it therefore
-        // leaks whatever the engine put there: 64 bytes per call for an Array return, nothing
-        // visible for a scalar. Destroying it first is what makes the two agree.
-        //
-        // Same rule as the virtual-return path in `virtuals`, reached from the other side: one
-        // of the two parties has to release the old value, and here it is us.
-        if let Some(destroy) = sys::interface_fn!(variant_get_ptr_destructor)(ret_type) {
-            destroy(r_return);
-        }
-        value.to_builtin(ret_type, r_return);
-    }
+            let this = if userdata.is_static {
+                None
+            } else {
+                Some(&mut *(instance as *mut T))
+            };
+
+            let result = (userdata.func)(this, &owned_args);
+
+            // A method declared as returning nothing is given no slot to write into.
+            let (Some(ret_type), false) = (userdata.ret, r_return.is_null()) else {
+                return;
+            };
+            let value = result.unwrap_or_else(|_| Variant::nil());
+            if ret_type == sys::GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NIL {
+                value.move_into(r_return as sys::GDExtensionVariantPtr);
+            } else {
+                // The engine constructs this slot before the call -- `VariantInternal::initialize`
+                // on the declared type -- but the conversion that writes into it is a placement
+                // new, documented as taking "uninitialized memory". Writing straight over it
+                // therefore leaks whatever the engine put there: 64 bytes per call for an Array
+                // return, nothing visible for a scalar. Destroying it first is what makes the two
+                // agree.
+                //
+                // Same rule as the virtual-return path in `virtuals`, reached from the other
+                // side: one of the two parties has to release the old value, and here it is us.
+                if let Some(destroy) = sys::interface_fn!(variant_get_ptr_destructor)(ret_type) {
+                    destroy(r_return);
+                }
+                value.to_builtin(ret_type, r_return);
+            }
+        },
+    );
 }
 
 /// Registers a method on an already-registered class.

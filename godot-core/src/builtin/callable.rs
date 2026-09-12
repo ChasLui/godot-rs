@@ -121,7 +121,15 @@ unsafe extern "C" fn closure_call(
 /// Releases the boxed closure when Godot drops the last reference to the callable.
 unsafe extern "C" fn closure_free(userdata: *mut std::ffi::c_void) {
     if !userdata.is_null() {
-        drop(Box::from_raw(userdata as *mut BoxedClosure));
+        // Dropping the closure drops whatever it captured, and a captured `Variant` releases
+        // itself through the interface table. Godot drops its callables during unload, by which
+        // point that table may already be gone, so this is the shutdown path as much as the
+        // ordinary one.
+        crate::panics::catch(
+            || "dropping a closure callable".to_string(),
+            (),
+            || drop(Box::from_raw(userdata as *mut BoxedClosure)),
+        );
     }
 }
 

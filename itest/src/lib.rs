@@ -184,9 +184,24 @@ struct RustTestResource {
 /// Counts how many `RustTestResource` instances Godot has told us to free.
 static RESOURCE_FREES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
 
+/// Whether the next `RustTestResource` destructor should panic.
+///
+/// Armed rather than unconditional, for the same reason `panic_in_virtual` is: Godot frees
+/// instances throughout the run and again during shutdown, so a destructor that always panicked
+/// would report an error for every other test's resources too.
+static RESOURCE_DROP_PANIC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 impl Drop for RustTestResource {
     fn drop(&mut self) {
         RESOURCE_FREES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+        // A user `Drop` runs inside the engine's free_instance callback, which is an
+        // `extern "C"` frame: unwinding out of it is undefined behaviour. Disarming as it fires
+        // keeps this to the single destructor the test asked for.
+        if RESOURCE_DROP_PANIC.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            panic!("deliberate panic from a user Drop");
+        }
     }
 }
 
@@ -204,6 +219,13 @@ impl RustTestResource {
     #[func]
     fn set_payload(&mut self, value: i64) {
         self.payload = value;
+    }
+
+    /// Makes the *next* destructor panic, so the boundary around `free_instance` is exercised
+    /// without every other resource in the suite panicking too.
+    #[func]
+    fn arm_drop_panic(&mut self) {
+        RESOURCE_DROP_PANIC.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// The same value as a property, which is what ResourceSaver writes to disk. A custom
@@ -286,6 +308,7 @@ struct RustTestNode {
     notifications: Vec<i32>,
     dynamic_sink: i64,
     panic_in_virtual: bool,
+    key_input_calls: i64,
     ready_calls: i64,
     process_calls: i64,
     physics_calls: i64,
@@ -310,6 +333,7 @@ impl RustTestNode {
             notifications: Vec::new(),
             dynamic_sink: 0,
             panic_in_virtual: false,
+            key_input_calls: 0,
             ready_calls: 0,
             process_calls: 0,
             physics_calls: 0,
@@ -572,8 +596,14 @@ impl RustTestNode {
     }
 
     /// The same, from a virtual method, which dispatches through a different boundary.
+    ///
+    /// The counter is bumped before the panic so the caller can tell "the engine never reached
+    /// this virtual" apart from "it reached it and the panic was contained" -- without it, a
+    /// virtual the engine never calls looks exactly like one whose panic was caught.
     #[godot_virtual]
     fn unhandled_key_input(&mut self, _event: Option<Gd<classes::InputEvent>>) {
+        self.key_input_calls += 1;
+
         if self.panic_in_virtual {
             panic!("deliberate panic from a virtual method");
         }
@@ -582,6 +612,12 @@ impl RustTestNode {
     #[func]
     fn arm_virtual_panic(&mut self) {
         self.panic_in_virtual = true;
+    }
+
+    /// How many times the engine has called `_unhandled_key_input` on this instance.
+    #[func]
+    fn key_input_calls(&mut self) -> i64 {
+        self.key_input_calls
     }
 
     /// Exercises the object-model APIs that had no coverage: a cast that should succeed, one

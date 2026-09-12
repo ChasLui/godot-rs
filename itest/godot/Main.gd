@@ -17,6 +17,7 @@ const EXPECTED_TESTS := [
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
 	"refcounted_class",
+	"virtual_panic", "drop_panic",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -41,7 +42,10 @@ func _ready() -> void:
 	test_previously_untested_apis()
 	test_math_builtins()
 	test_collections()
+	test_virtual_panic()
 	test_refcounted_class()
+	# Counts destructors, so it must follow the test that asserts an exact destructor count.
+	test_drop_panic()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
 	call_deferred("start_virtual_test")
 	return
@@ -840,6 +844,71 @@ func test_reference_counting() -> void:
 
 	n.free()
 	done("reference_counting")
+
+func test_virtual_panic() -> void:
+	# A panic inside a virtual leaves Rust by a different route than one inside a #[func]: the
+	# engine calls the trampoline directly, and an unwind escaping that frame aborts the process
+	# rather than being reported. Reaching the checks below is therefore part of the assertion.
+	var n: Node = ClassDB.instantiate("RustTestNode")
+	add_child(n)
+
+	# Unarmed first. Without this the armed run below could not be told apart from an engine
+	# that never calls the virtual at all -- which is how a test ends up asserting nothing.
+	push_key_event()
+	check(n.key_input_calls() == 1,
+		"_unhandled_key_input fired %d times, expected 1; the panic path below would not have "
+			% n.key_input_calls() + "been exercised at all")
+
+	n.arm_virtual_panic()
+	print("  (the next error is expected: a deliberate panic inside a virtual method)")
+	push_key_event()
+
+	check(n.key_input_calls() == 2,
+		"the armed virtual was entered %d times, expected 2" % n.key_input_calls())
+	# Containing the panic is only worth doing if the object survives it.
+	check(n.echo_int(5) == 5, "the object was unusable after a panic inside a virtual")
+	check(n.bump() == 1, "instance state was lost after a panic inside a virtual")
+
+	remove_child(n)
+	n.free()
+	done("virtual_panic")
+
+func push_key_event() -> void:
+	var ev := InputEventKey.new()
+	ev.keycode = KEY_A
+	ev.pressed = true
+	get_viewport().push_input(ev)
+
+func test_drop_panic() -> void:
+	# A user's `Drop` runs inside the engine's free_instance callback, which is another
+	# `extern "C"` frame -- and Godot frees instances during shutdown as well as during play, so
+	# an unwind escaping it takes the process down at the worst possible moment.
+	var probe: Object = ClassDB.instantiate("RustTestNode")
+	var before: int = probe.resource_free_count()
+
+	var res: Object = ClassDB.instantiate("RustTestResource")
+	res.arm_drop_panic()
+	print("  (the next error is expected: a deliberate panic inside a Rust Drop)")
+	# The last reference goes away here, so the destructor runs -- and panics.
+	res = null
+
+	check(probe.resource_free_count() == before + 1,
+		"the panicking destructor did not run: the count went from %d to %d"
+			% [before, probe.resource_free_count()])
+
+	# The next resource must still be built and freed normally. A boundary that survived the
+	# panic but left the engine's bookkeeping broken would show up here rather than above.
+	var again: Object = ClassDB.instantiate("RustTestResource")
+	check(again != null, "a Rust Resource could not be created after a panic in Drop")
+	check(again.payload() == 7,
+		"a Rust Resource was unusable after a panic in Drop, payload is %s" % again.payload())
+	again = null
+	check(probe.resource_free_count() == before + 2,
+		"the destructor after the panicking one did not run: the count is %d, expected %d"
+			% [probe.resource_free_count(), before + 2])
+
+	probe.free()
+	done("drop_panic")
 
 func test_instance_state() -> void:
 	var a: Object = ClassDB.instantiate("RustTestNode")
