@@ -1018,3 +1018,62 @@ fn object_class_of(path: &syn::TypePath) -> Option<TokenStream> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn method(tokens: TokenStream) -> ImplItemFn {
+        syn::parse2(tokens).expect("test input is a method")
+    }
+
+    /// An argument these attributes do not take used to vanish along with the attribute, leaving
+    /// the method exported under the Rust name the argument was written to change.
+    #[test]
+    fn an_attribute_argument_is_refused_rather_than_dropped() {
+        let mut m = method(quote! { #[func(name = "renamed")] fn echo(&mut self) {} });
+        let err = take_attr(&mut m, "func").expect_err("an argument must be refused");
+        assert!(err.to_string().contains("takes no arguments"), "{err}");
+    }
+
+    #[test]
+    fn a_bare_attribute_is_taken_and_removed() {
+        let mut m = method(quote! { #[func] fn echo(&mut self) {} });
+        assert!(take_attr(&mut m, "func").unwrap());
+        assert!(m.attrs.is_empty(), "the marker must not stay on the method");
+        assert!(
+            !take_attr(&mut m, "func").unwrap(),
+            "a second take finds nothing"
+        );
+    }
+
+    /// No setter is the read-only form, which Godot spells as an empty setter name. That covers
+    /// both the bare attribute, which has no parentheses to parse, and one with other arguments.
+    #[test]
+    fn a_prop_without_a_setter_is_read_only() {
+        let mut bare = method(quote! { #[prop] fn get_marker(&mut self) -> i64 { 7 } });
+        let attr = take_prop_attr(&mut bare)
+            .unwrap()
+            .expect("a prop attribute");
+        assert_eq!(attr.setter, "");
+
+        let mut hinted = method(quote! {
+            #[prop(hint = PROPERTY_HINT_RANGE, hint_string = "0,10")]
+            fn get_marker(&mut self) -> i64 { 7 }
+        });
+        let attr = take_prop_attr(&mut hinted)
+            .unwrap()
+            .expect("a prop attribute");
+        assert_eq!(attr.setter, "");
+    }
+
+    #[test]
+    fn a_prop_with_a_setter_keeps_its_name() {
+        let mut m = method(quote! {
+            #[prop(set = set_marker)]
+            fn get_marker(&mut self) -> i64 { 7 }
+        });
+        let attr = take_prop_attr(&mut m).unwrap().expect("a prop attribute");
+        assert_eq!(attr.setter, "set_marker");
+    }
+}
