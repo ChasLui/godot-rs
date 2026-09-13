@@ -21,6 +21,126 @@ pub(crate) unsafe fn constructor(
     ctor
 }
 
+/// Resolves the engine's evaluator for operator `op` between two Variant types.
+pub(crate) unsafe fn operator_evaluator(
+    op: sys::GDExtensionVariantOperator,
+    ty_a: sys::GDExtensionVariantType,
+    ty_b: sys::GDExtensionVariantType,
+) -> sys::GDExtensionPtrOperatorEvaluator {
+    let evaluator = sys::interface_fn!(variant_get_ptr_operator_evaluator)(op, ty_a, ty_b);
+    assert!(
+        evaluator.is_some(),
+        "engine has no evaluator for operator {op} on these builtins"
+    );
+    evaluator
+}
+
+/// Evaluates `op` on two operands of Variant type `ty` and takes the result.
+///
+/// The result goes through [`PtrcallRet`](crate::ptrcall::PtrcallRet) because the evaluator
+/// writes it exactly the way a ptrcall writes a return value: it *assigns* into the slot. For a
+/// result the engine owns memory for (`String`, `Array`, `Packed*Array`) the slot must therefore
+/// start zeroed, never uninitialized, or the engine releases a garbage pointer first -- and
+/// `from_ptrcall` is where that rule already lives.
+///
+/// # Safety
+/// `a` and `b` must point to initialized values of type `ty`, and `R` must be the Rust
+/// counterpart of the type the engine's operator returns.
+pub(crate) unsafe fn evaluate<R: crate::ptrcall::PtrcallRet>(
+    op: sys::GDExtensionVariantOperator,
+    ty: sys::GDExtensionVariantType,
+    a: sys::GDExtensionConstTypePtr,
+    b: sys::GDExtensionConstTypePtr,
+) -> R {
+    let evaluator = operator_evaluator(op, ty, ty).unwrap();
+    R::from_ptrcall(|ret| evaluator(a, b, ret))
+}
+
+/// Implements Rust's operator traits for a builtin whose memory the engine owns.
+///
+/// Such a value cannot be compared byte by byte -- two equal strings are two different CowData
+/// pointers -- so every operator is the engine's own. Each arm is opt-in because the engine
+/// defines a different set of operators per type.
+macro_rules! engine_operators {
+    ($t:ty, $tag:ident, eq) => {
+        impl PartialEq for $t {
+            fn eq(&self, other: &Self) -> bool {
+                // SAFETY: both operands are initialized values of this type; `==` yields a bool.
+                unsafe {
+                    $crate::builtin::macros::evaluate(
+                        sys::GDExtensionVariantOperator_GDEXTENSION_VARIANT_OP_EQUAL,
+                        sys::$tag,
+                        self.as_ptr() as sys::GDExtensionConstTypePtr,
+                        other.as_ptr() as sys::GDExtensionConstTypePtr,
+                    )
+                }
+            }
+        }
+    };
+    ($t:ty, $tag:ident, eq_hash) => {
+        engine_operators!($t, $tag, eq);
+
+        // Only for types whose `==` is reflexive. A container holding a NaN is not equal to
+        // itself, which is why the arrays and dictionaries do not get this.
+        impl Eq for $t {}
+
+        impl std::hash::Hash for $t {
+            fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+                // The engine's hash of the contents, not of the handle: two equal values built
+                // separately hold different pointers, and must still land in the same bucket.
+                state.write_i64(<$t>::hash(self));
+            }
+        }
+    };
+    ($t:ty, $tag:ident, ord) => {
+        impl PartialOrd for $t {
+            fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+                // SAFETY: both operands are initialized values of this type; `<` yields a bool.
+                let less = |a: &Self, b: &Self| -> bool {
+                    unsafe {
+                        $crate::builtin::macros::evaluate(
+                            sys::GDExtensionVariantOperator_GDEXTENSION_VARIANT_OP_LESS,
+                            sys::$tag,
+                            a.as_ptr() as sys::GDExtensionConstTypePtr,
+                            b.as_ptr() as sys::GDExtensionConstTypePtr,
+                        )
+                    }
+                };
+
+                // Built from the engine's `==` and `<` alone, so the ordering is whatever the
+                // engine's is -- including for StringName, whose `<` need not be alphabetical.
+                if self == other {
+                    Some(std::cmp::Ordering::Equal)
+                } else if less(self, other) {
+                    Some(std::cmp::Ordering::Less)
+                } else if less(other, self) {
+                    Some(std::cmp::Ordering::Greater)
+                } else {
+                    None
+                }
+            }
+        }
+    };
+    ($t:ty, $tag:ident, add -> $out:ty) => {
+        impl std::ops::Add<&$t> for &$t {
+            type Output = $out;
+
+            fn add(self, rhs: &$t) -> $out {
+                // SAFETY: both operands are initialized values of this type, and `$out` is what
+                // the API dump says `+` returns for it.
+                unsafe {
+                    $crate::builtin::macros::evaluate(
+                        sys::GDExtensionVariantOperator_GDEXTENSION_VARIANT_OP_ADD,
+                        sys::$tag,
+                        self.as_ptr() as sys::GDExtensionConstTypePtr,
+                        rhs.as_ptr() as sys::GDExtensionConstTypePtr,
+                    )
+                }
+            }
+        }
+    };
+}
+
 /// Resolves a method on a builtin type, by name and signature hash.
 pub(crate) unsafe fn builtin_method(
     ty: sys::GDExtensionVariantType,

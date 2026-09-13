@@ -1937,6 +1937,72 @@ impl RustTestNode {
         }
     }
 
+    // -- Operators ----------------------------------------------------------------------
+
+    /// Evaluates Rust's operator traits on each pair GDScript built, keyed like `pairs`.
+    ///
+    /// Everything before a key's last underscore names the type. GDScript evaluates the same
+    /// expressions with its own operators and compares, so the expected answer is always the
+    /// engine's rather than one written down -- StringName's `<`, for one, need not be
+    /// alphabetical.
+    #[func]
+    fn builtin_operators(&mut self, pairs: Dictionary) -> Dictionary {
+        let mut out = Dictionary::new();
+        let keys = pairs.keys();
+
+        for i in 0..keys.len() {
+            let key = keys.get(i);
+            let name = GString::try_from_variant(&key)
+                .map(|s| s.to_rust_string())
+                .unwrap_or_default();
+            let pair = VariantArray::try_from_variant(&pairs.get(&key, &Variant::nil()))
+                .unwrap_or_default();
+            let (a, b) = (pair.get(0), pair.get(1));
+
+            let result = match name.rsplit_once('_').map_or("", |(kind, _)| kind) {
+                "string" => ordered::<GString, GString>(&a, &b),
+                "string_name" => ordered::<StringName, GString>(&a, &b),
+                "array" => ordered::<VariantArray, VariantArray>(&a, &b),
+                "packed_int32" => concatenated::<PackedInt32Array>(&a, &b),
+                "packed_string" => concatenated::<PackedStringArray>(&a, &b),
+                "packed_vector2" => concatenated::<PackedVector2Array>(&a, &b),
+                "node_path" => equality::<NodePath>(&a, &b),
+                "callable" => equality::<Callable>(&a, &b),
+                "signal" => equality::<Signal>(&a, &b),
+                "dictionary" => equality::<Dictionary>(&a, &b),
+                "typed_array" => equality::<TypedArray<i64>>(&a, &b),
+                "variant" => equality::<Variant>(&a, &b),
+                // Left out of the result, which GDScript reports as a missing key.
+                _ => continue,
+            };
+            out.set(&key, &result.to_variant());
+        }
+
+        out
+    }
+
+    /// How many entries a `HashMap` holds after inserting two equal keys built separately, as
+    /// `[GString entries, StringName entries]`. Both must be 1.
+    ///
+    /// Each `GString::new` allocates its own buffer, so a hash of the handle rather than of the
+    /// contents splits the two strings into separate entries.
+    #[func]
+    fn hash_map_entries(&mut self) -> VariantArray {
+        let strings: std::collections::HashMap<GString, i64> =
+            [(GString::new("key"), 1), (GString::new("key"), 2)]
+                .into_iter()
+                .collect();
+        let names: std::collections::HashMap<StringName, i64> =
+            [(StringName::new("key"), 1), (StringName::new("key"), 2)]
+                .into_iter()
+                .collect();
+
+        let mut out = VariantArray::new();
+        out.push(&(strings.len() as i64).to_variant());
+        out.push(&(names.len() as i64).to_variant());
+        out
+    }
+
     // -- Object lifetime ----------------------------------------------------------------
 
     /// Repeated create/free. A ptrcall that corrupts memory usually survives the first call and
@@ -2012,6 +2078,48 @@ impl RustTestNode {
 
         !still_alive
     }
+}
+
+/// Reads one operand of `builtin_operators`. A wrong type panics, which the `#[func]` contains and
+/// GDScript then sees as a missing result.
+fn operand<T: FromGodot>(v: &Variant) -> T {
+    T::try_from_variant(v).expect("operand has the wrong type for its key")
+}
+
+/// `[a == b, a != b]`, in the order GDScript builds its own.
+fn equality<T: FromGodot + PartialEq>(a: &Variant, b: &Variant) -> VariantArray {
+    let (a, b) = (operand::<T>(a), operand::<T>(b));
+    let mut out = VariantArray::new();
+    out.push(&(a == b).to_variant());
+    out.push(&(a != b).to_variant());
+    out
+}
+
+/// Equality, then `+`.
+fn concatenated<T>(a: &Variant, b: &Variant) -> VariantArray
+where
+    T: FromGodot + ToGodot + PartialEq,
+    for<'x> &'x T: std::ops::Add<&'x T, Output = T>,
+{
+    let mut out = equality::<T>(a, b);
+    out.push(&(&operand::<T>(a) + &operand::<T>(b)).to_variant());
+    out
+}
+
+/// Equality, the four orderings, then `+`.
+fn ordered<T, Sum>(a: &Variant, b: &Variant) -> VariantArray
+where
+    T: FromGodot + PartialOrd,
+    Sum: ToGodot,
+    for<'x> &'x T: std::ops::Add<&'x T, Output = Sum>,
+{
+    let mut out = equality::<T>(a, b);
+    let (a, b) = (operand::<T>(a), operand::<T>(b));
+    for r in [a < b, a > b, a <= b, a >= b] {
+        out.push(&r.to_variant());
+    }
+    out.push(&(&a + &b).to_variant());
+    out
 }
 
 godot_entry!(itest_init, ItestLibrary);

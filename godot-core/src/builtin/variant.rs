@@ -114,6 +114,29 @@ impl Clone for Variant {
     }
 }
 
+impl PartialEq for Variant {
+    fn eq(&self, other: &Self) -> bool {
+        // SAFETY: both operands are initialized Variants. The result slot is zeroed -- the nil
+        // Variant -- so dropping it is sound whether or not the engine wrote into it.
+        unsafe {
+            let mut result = MaybeUninit::<Self>::zeroed();
+            let mut valid: sys::GDExtensionBool = 0;
+            sys::interface_fn!(variant_evaluate)(
+                sys::GDExtensionVariantOperator_GDEXTENSION_VARIANT_OP_EQUAL,
+                self.as_ptr(),
+                other.as_ptr(),
+                result.as_mut_ptr() as sys::GDExtensionUninitializedVariantPtr,
+                &mut valid,
+            );
+            let result = result.assume_init();
+
+            // An operation the engine has no evaluator for, such as comparing a String with an
+            // int, is reported as invalid rather than unequal; for `==` those mean the same.
+            valid != 0 && bool::try_from_variant(&result) == Some(true)
+        }
+    }
+}
+
 impl Drop for Variant {
     fn drop(&mut self) {
         unsafe {

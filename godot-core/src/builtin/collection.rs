@@ -101,6 +101,56 @@ engine_builtin!(
     SIZE_PACKEDVECTOR4ARRAY
 );
 
+engine_operators!(
+    NodePath,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_NODE_PATH,
+    eq_hash
+);
+engine_operators!(
+    VariantArray,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_ARRAY,
+    eq
+);
+engine_operators!(
+    VariantArray,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_ARRAY,
+    ord
+);
+engine_operators!(
+    VariantArray,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_ARRAY,
+    add -> VariantArray
+);
+engine_operators!(
+    Dictionary,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_DICTIONARY,
+    eq
+);
+
+/// `==` and `+` for every `Packed*Array`, which is exactly the set of same-type operators the
+/// API dump gives them.
+macro_rules! packed_operators {
+    ($($t:ident => $tag:ident),* $(,)?) => {
+        $(
+            engine_operators!($t, $tag, eq);
+            engine_operators!($t, $tag, add -> $t);
+        )*
+    };
+}
+
+packed_operators!(
+    PackedByteArray => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_BYTE_ARRAY,
+    PackedInt32Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_INT32_ARRAY,
+    PackedInt64Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_INT64_ARRAY,
+    PackedFloat32Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT32_ARRAY,
+    PackedFloat64Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_FLOAT64_ARRAY,
+    PackedStringArray => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_STRING_ARRAY,
+    PackedVector2Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR2_ARRAY,
+    PackedVector3Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR3_ARRAY,
+    PackedColorArray => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_COLOR_ARRAY,
+    PackedVector4Array => GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_PACKED_VECTOR4_ARRAY,
+);
+
 impl NodePath {
     /// Parses a path such as `"../Sibling/Child"` or `"Node:property"`.
     ///
@@ -346,6 +396,13 @@ impl<T: ArrayElement> Clone for TypedArray<T> {
             inner: self.inner.clone(),
             _marker: std::marker::PhantomData,
         }
+    }
+}
+
+// The element type lives inside the container, so equality is the untyped array's.
+impl<T: ArrayElement> PartialEq for TypedArray<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 

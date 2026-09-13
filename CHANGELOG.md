@@ -22,6 +22,12 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   to -- previously a raw `GDExtensionObjectPtr` field every class had to keep and wrap by hand
 - `godot-macros`: `#[godot_api]` with `#[func]`, `#[prop]`, `#[signal]`, `#[godot_virtual]`.
   A `#[prop]` with no setter is read-only: the inspector shows it and a write is refused
+- The engine-owned builtins compare and concatenate. `==` on strings, names, paths, callables,
+  signals, dictionaries, arrays, the packed arrays and `Variant`; `Eq` and `Hash` on `GString`,
+  `StringName` and `NodePath`, so they can key a `HashMap`; `<` on strings and arrays; `&a + &b`
+  wherever the engine defines `+`. None of these values can be compared byte by byte, so every
+  operator is the engine's own -- which makes `StringName`'s order the engine's, and not
+  alphabetical
 - `godot-async`: frame-driven executor
 - `itest`: integration tests that run inside a real Godot instance
 

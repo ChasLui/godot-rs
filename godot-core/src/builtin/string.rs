@@ -124,6 +124,22 @@ impl ToGodot for &str {
     }
 }
 
+engine_operators!(
+    GString,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+    eq_hash
+);
+engine_operators!(
+    GString,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+    ord
+);
+engine_operators!(
+    GString,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING,
+    add -> GString
+);
+
 impl Clone for GString {
     fn clone(&self) -> Self {
         // SAFETY: constructor 1 is the copy constructor for every builtin; `opaque` holds an

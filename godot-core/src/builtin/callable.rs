@@ -24,6 +24,17 @@ engine_builtin!(
     SIZE_SIGNAL
 );
 
+engine_operators!(
+    Callable,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_CALLABLE,
+    eq
+);
+engine_operators!(
+    Signal,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_SIGNAL,
+    eq
+);
+
 /// Builds one of these from `(object, name)`, which is constructor 2 for both types.
 ///
 /// # Safety

@@ -18,7 +18,7 @@ const EXPECTED_TESTS := [
 	"math_builtins", "collections", "instance_state", "virtuals",
 	"refcounted_class", "base_object", "readonly_property",
 	"utility_functions", "packed_arrays", "math_types", "builtin_constants",
-	"virtual_panic", "drop_panic",
+	"virtual_panic", "drop_panic", "builtin_operators",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -47,6 +47,7 @@ func _ready() -> void:
 	test_packed_arrays()
 	test_math_types()
 	test_builtin_constants()
+	test_builtin_operators()
 	test_virtual_panic()
 	test_refcounted_class()
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
@@ -1163,6 +1164,79 @@ func test_builtin_constants() -> void:
 
 	n.free()
 	done("builtin_constants")
+
+func test_builtin_operators() -> void:
+	# The builtins whose memory the engine owns get Rust's operator traits from the engine's own
+	# evaluators. Rust evaluates each pair and GDScript evaluates the same expressions itself, so
+	# the expected answer is always the engine's: StringName's `<` need not be alphabetical, and
+	# whether a dictionary's equality cares about insertion order is the engine's call too.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	var typed_a: Array[int] = [1, 2]
+	var typed_b: Array[int] = [1, 2]
+	var typed_c: Array[int] = [1, 3]
+
+	# Everything before the last underscore names the type; the rest only tells cases apart.
+	# Equal operands are built separately, so they are equal values rather than one shared buffer.
+	var pairs := {
+		"string_ab": ["apple", "banana"],
+		"string_same": ["apple", "app" + "le"],
+		"string_ba": ["pear", "apple"],
+		"string_name_ab": [&"apple", &"banana"],
+		"string_name_same": [&"apple", StringName("app" + "le")],
+		"string_name_ba": [&"pear", &"apple"],
+		"array_ab": [[1, 2], [1, 3]],
+		"array_same": [[1, "x"], [1, "x"]],
+		"array_ba": [[2], [1, 5]],
+		"node_path_same": [NodePath("a/b"), NodePath("a/" + "b")],
+		"node_path_different": [NodePath("a/b"), NodePath("a/c")],
+		"callable_same": [Callable(n, "make_array"), Callable(n, "make_array")],
+		"callable_different": [Callable(n, "make_array"), Callable(n, "sum_array")],
+		"signal_same": [Signal(n, "counter_changed"), Signal(n, "counter_changed")],
+		"signal_different": [Signal(n, "counter_changed"), Signal(self, "ready")],
+		"dictionary_reordered": [{"a": 1, "b": 2}, {"b": 2, "a": 1}],
+		"dictionary_different": [{"a": 1}, {"a": 2}],
+		"packed_int32_same": [PackedInt32Array([1, 2]), PackedInt32Array([1, 2])],
+		"packed_int32_different": [PackedInt32Array([1, 2]), PackedInt32Array([3])],
+		"packed_string_different": [PackedStringArray(["a"]), PackedStringArray(["b", "c"])],
+		"packed_vector2_same": [PackedVector2Array([Vector2(1, 2)]),
+			PackedVector2Array([Vector2(1, 2)])],
+		"typed_array_same": [typed_a, typed_b],
+		"typed_array_different": [typed_a, typed_c],
+		"variant_same": [1, 1.0],
+		"variant_different": [1, 2],
+	}
+
+	var got: Dictionary = n.builtin_operators(pairs)
+	for key: String in pairs:
+		var a = pairs[key][0]
+		var b = pairs[key][1]
+		var kind := key.substr(0, key.rfind("_"))
+		var expected := [a == b, a != b]
+		if kind in ["string", "string_name", "array"]:
+			expected.append_array([a < b, a > b, a <= b, a >= b])
+		if kind in ["string", "string_name", "array"] or kind.begins_with("packed_"):
+			expected.append(a + b)
+
+		check(got.has(key), "the Rust side returned no result for '%s'" % key)
+		if not got.has(key):
+			continue
+		check(got[key] == expected, "%s: Rust computed %s, GDScript %s" % [key, got[key], expected])
+
+	# StringName + StringName is a String in the API dump, and the Rust result must be one too.
+	if got.has("string_name_ab"):
+		check(typeof(got["string_name_ab"][6]) == TYPE_STRING,
+			"StringName + StringName came back as type %d, expected TYPE_STRING"
+				% typeof(got["string_name_ab"][6]))
+
+	# Two equal keys built separately must share one HashMap entry: Hash has to follow the
+	# contents, not the handle.
+	var entries: Array = n.hash_map_entries()
+	check(entries == [1, 1],
+		"HashMaps keyed by two equal GStrings and two equal StringNames hold %s entries, expected [1, 1]"
+			% [entries])
+
+	n.free()
+	done("builtin_operators")
 
 func test_virtual_panic() -> void:
 	# A panic inside a virtual leaves Rust by a different route than one inside a #[func]: the

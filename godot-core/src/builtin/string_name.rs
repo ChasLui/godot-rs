@@ -6,6 +6,10 @@ use std::mem::MaybeUninit;
 ///
 /// The engine owns the representation; this is an opaque buffer whose size comes from
 /// `extension_api.json` for the build configuration in use. Never assume a layout.
+///
+/// Comparison is the engine's own. `==` is identity of the interned name, which is equality of
+/// the text; `<` is the engine's order too, and that is not alphabetical -- `&"pear" < &"apple"`
+/// holds. Compare `to_string()` where a lexical order is what is wanted.
 #[repr(C)]
 pub struct StringName {
     opaque: [u8; sys::builtin_sizes::SIZE_STRINGNAME],
@@ -151,6 +155,24 @@ impl crate::builtin::FromGodot for StringName {
         }
     }
 }
+
+engine_operators!(
+    StringName,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+    eq_hash
+);
+engine_operators!(
+    StringName,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+    ord
+);
+// Concatenating two names gives a String, not a new name: the API dump says so, and interning
+// every intermediate result would be the wrong default.
+engine_operators!(
+    StringName,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_STRING_NAME,
+    add -> crate::builtin::GString
+);
 
 impl Clone for StringName {
     fn clone(&self) -> Self {
