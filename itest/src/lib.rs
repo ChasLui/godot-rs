@@ -8,8 +8,8 @@ use godot::builtin::{
     Basis, Callable, Color, Dictionary, NodePath, PackedByteArray, PackedColorArray,
     PackedFloat32Array, PackedFloat64Array, PackedInt32Array, PackedInt64Array, PackedStringArray,
     PackedVector2Array, PackedVector3Array, PackedVector4Array, Plane, Projection, Quaternion,
-    Rect2, Rect2i, Rid, Signal, Transform2D, TypedArray, VariantArray, Vector2, Vector2i, Vector3,
-    Vector3i, Vector4,
+    Rect2, Rect2i, Rid, Signal, Transform2D, Transform3D, TypedArray, VariantArray, Vector2,
+    Vector2i, Vector3, Vector3i, Vector4, Vector4i,
 };
 use godot::classes;
 use godot::global;
@@ -1885,6 +1885,56 @@ impl RustTestNode {
     #[func]
     fn rid_id(&mut self, rid: Rid) -> i64 {
         rid.id as i64
+    }
+
+    // -- Generated constants ------------------------------------------------------------
+
+    /// A sample of the constants generated from the API dump, keyed by name.
+    ///
+    /// The dump spells every value as a flat list of scalars in memory order, so the generator
+    /// has to regroup them into the Rust structs' fields. GDScript holding the same constants is
+    /// the only way to catch a scalar that landed in the wrong field: a swapped pair compiles,
+    /// is the right size, and is wrong. The nested types are all here for that reason, and the
+    /// colours are the ones with four distinct components.
+    #[func]
+    fn make_constant_values(&mut self) -> Dictionary {
+        let mut d = Dictionary::new();
+
+        let mut set = |key: &str, value: Variant| {
+            d.set(&key.to_variant(), &value);
+        };
+
+        set("vector2_left", Vector2::LEFT.to_variant());
+        set("vector2_inf", Vector2::INF.to_variant());
+        set("vector2i_down", Vector2i::DOWN.to_variant());
+        set("vector3_forward", Vector3::FORWARD.to_variant());
+        set("vector3i_min", Vector3i::MIN.to_variant());
+        set("vector4_one", Vector4::ONE.to_variant());
+        set("vector4i_max", Vector4i::MAX.to_variant());
+        set("color_alice_blue", Color::ALICE_BLUE.to_variant());
+        set("color_red", Color::RED.to_variant());
+        set("quaternion_identity", Quaternion::IDENTITY.to_variant());
+        set("plane_yz", Plane::PLANE_YZ.to_variant());
+        set("basis_flip_y", Basis::FLIP_Y.to_variant());
+        set("transform2d_flip_x", Transform2D::FLIP_X.to_variant());
+        set("transform3d_flip_z", Transform3D::FLIP_Z.to_variant());
+        set("projection_identity", Projection::IDENTITY.to_variant());
+
+        d
+    }
+
+    /// A `Vector4i` built in Rust, for GDScript to read back field by field.
+    ///
+    /// Every field gets a distinct value, and none is a power of two apart: a wrong field order
+    /// or element width scrambles the numbers rather than crashing.
+    #[func]
+    fn make_vector4i(&mut self) -> Vector4i {
+        Vector4i {
+            x: 1,
+            y: -2,
+            z: 3,
+            w: -4,
+        }
     }
 
     // -- Object lifetime ----------------------------------------------------------------

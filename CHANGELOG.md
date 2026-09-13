@@ -13,7 +13,10 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   table resolved through `get_proc_address`
 - `godot-codegen` / `godot-bindings`: bindings generated from `extension_api.json` -- every
   non-editor class, and all 114 of Godot's global utility functions (`lerp`, `randi`,
-  `type_convert`, `is_instance_valid`, ...) as free functions in `global`
+  `type_convert`, `is_instance_valid`, ...) as free functions in `global`, and the builtins'
+  own 210 constants (`Vector2::LEFT`, `Color::RED`, `Basis::IDENTITY`, ...) as compile-time
+  values rather than engine calls. `Vector4i` exists now too; the dump has always had it, and
+  `PackedVector4Array` was already here without the element type it holds
 - `godot-core`: `Variant`, builtin types, `Gd<T>` with reference counting, class registration,
   `ptrcall`/varcall, and `Base<T>`, the handle a class uses to act on the object it is attached
   to -- previously a raw `GDExtensionObjectPtr` field every class had to keep and wrap by hand

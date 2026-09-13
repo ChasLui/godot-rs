@@ -875,3 +875,57 @@ fn syn_free_format(text: &str) -> Option<String> {
 
     Some(out)
 }
+
+/// Turns Godot's BBCode description into something rustdoc will accept.
+///
+/// The docs are built with warnings denied, and Godot's prose trips three lints at once:
+/// `[param x]` reads as an intra-doc link to a page that does not exist, `<` opens an HTML tag,
+/// and a bare URL inside `[url=...]` is a bare URL. Escaping the two opening characters and
+/// quoting the URLs leaves the text readable and inert.
+///
+/// Leading whitespace goes for a fourth reason: an indented line is a Markdown code block, which
+/// rustdoc then tries to compile as a Rust doctest. Godot indents inside `[codeblock]`, so the
+/// indentation is lost -- a smaller price than a doctest that cannot compile.
+pub(crate) fn markdown_safe(description: &str) -> String {
+    let lines: Vec<String> = description
+        .lines()
+        .map(|line| {
+            let escaped = line.trim_start().replace('[', "\\[").replace('<', "\\<");
+            // A leading `#` is a heading; Godot writes GDScript comments that way.
+            if escaped.starts_with('#') {
+                format!("\\{escaped}")
+            } else {
+                escaped
+            }
+        })
+        .collect();
+
+    quote_urls(&lines.join("\n"))
+}
+
+/// Wraps every `http(s)://...` run in backticks. URLs appear inside `[url=...]text[/url]`, so
+/// they end at the closing bracket as often as at a space.
+fn quote_urls(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("http") {
+        let (before, tail) = rest.split_at(start);
+        out.push_str(before);
+
+        if !tail.starts_with("http://") && !tail.starts_with("https://") {
+            out.push_str("http");
+            rest = &tail["http".len()..];
+            continue;
+        }
+
+        let end = tail.find([' ', ']', '\n']).unwrap_or(tail.len());
+        out.push('`');
+        out.push_str(&tail[..end]);
+        out.push('`');
+        rest = &tail[end..];
+    }
+
+    out.push_str(rest);
+    out
+}

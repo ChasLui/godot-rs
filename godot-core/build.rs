@@ -10,8 +10,9 @@ fn main() {
     let generated = godot_codegen::builtins::generate_builtin_methods(&api_json);
 
     println!(
-        "cargo:warning=godot-core: {} builtin types, {} methods generated, {} skipped",
-        generated.type_count, generated.method_count, generated.skipped
+        "cargo:warning=godot-core: {} builtin types, {} methods and {} constants generated, \
+         {} skipped",
+        generated.type_count, generated.method_count, generated.constant_count, generated.skipped
     );
 
     std::fs::write(

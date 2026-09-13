@@ -17,7 +17,8 @@ const EXPECTED_TESTS := [
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
 	"refcounted_class", "base_object", "readonly_property",
-	"utility_functions", "packed_arrays", "math_types", "virtual_panic", "drop_panic",
+	"utility_functions", "packed_arrays", "math_types", "builtin_constants",
+	"virtual_panic", "drop_panic",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -45,6 +46,7 @@ func _ready() -> void:
 	test_utility_functions()
 	test_packed_arrays()
 	test_math_types()
+	test_builtin_constants()
 	test_virtual_panic()
 	test_refcounted_class()
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
@@ -1117,6 +1119,50 @@ func test_math_types() -> void:
 
 	n.free()
 	done("math_types")
+
+func test_builtin_constants() -> void:
+	# The constants are generated from the API dump, which spells every value as a flat list of
+	# scalars in memory order. Comparing each against GDScript's own constant of the same name is
+	# what catches a scalar that landed in the wrong field: a swapped pair still compiles and is
+	# still the right size. The nested types are all covered for that reason.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	var got: Dictionary = n.make_constant_values()
+
+	var expected := {
+		"vector2_left": Vector2.LEFT,
+		"vector2_inf": Vector2.INF,
+		"vector2i_down": Vector2i.DOWN,
+		"vector3_forward": Vector3.FORWARD,
+		"vector3i_min": Vector3i.MIN,
+		"vector4_one": Vector4.ONE,
+		"vector4i_max": Vector4i.MAX,
+		"color_alice_blue": Color.ALICE_BLUE,
+		"color_red": Color.RED,
+		"quaternion_identity": Quaternion.IDENTITY,
+		"plane_yz": Plane.PLANE_YZ,
+		"basis_flip_y": Basis.FLIP_Y,
+		"transform2d_flip_x": Transform2D.FLIP_X,
+		"transform3d_flip_z": Transform3D.FLIP_Z,
+		"projection_identity": Projection.IDENTITY,
+	}
+
+	for key: String in expected:
+		check(got.has(key), "the Rust side did not return a constant named '%s'" % key)
+		if not got.has(key):
+			continue
+		check(got[key] == expected[key],
+			"%s is %s in Rust, GDScript has %s" % [key, got[key], expected[key]])
+
+	# Vector4i is new to the bindings, so the round trip is read field by field rather than
+	# compared whole: that says which field is wrong, not merely that one is.
+	var v: Vector4i = n.make_vector4i()
+	check(v.x == 1, "Vector4i.x came back as %d, expected 1" % v.x)
+	check(v.y == -2, "Vector4i.y came back as %d, expected -2" % v.y)
+	check(v.z == 3, "Vector4i.z came back as %d, expected 3" % v.z)
+	check(v.w == -4, "Vector4i.w came back as %d, expected -4" % v.w)
+
+	n.free()
+	done("builtin_constants")
 
 func test_virtual_panic() -> void:
 	# A panic inside a virtual leaves Rust by a different route than one inside a #[func]: the

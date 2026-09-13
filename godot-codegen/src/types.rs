@@ -43,6 +43,7 @@ fn is_copy_builtin(name: &str) -> bool {
             | "Vector3"
             | "Vector3i"
             | "Vector4"
+            | "Vector4i"
             | "Color"
             | "Rect2"
             | "Rect2i"
@@ -218,6 +219,7 @@ pub fn map_type_with(
         "Vector3" => return Some(RustTy::Builtin("Vector3")),
         "Vector3i" => return Some(RustTy::Builtin("Vector3i")),
         "Vector4" => return Some(RustTy::Builtin("Vector4")),
+        "Vector4i" => return Some(RustTy::Builtin("Vector4i")),
         "Color" => return Some(RustTy::Builtin("Color")),
         "Rect2" => return Some(RustTy::Builtin("Rect2")),
         "Rect2i" => return Some(RustTy::Builtin("Rect2i")),
@@ -421,7 +423,11 @@ fn strip_quotes(raw: &str) -> Option<String> {
 }
 
 /// `Color(1, 1, 1, 1)` -> `[1.0, 1.0, 1.0, 1.0]`
-fn parse_call_args(name: &str, raw: &str) -> Option<Vec<f64>> {
+///
+/// The builtin *constants* are spelled the same way, so `builtins.rs` parses them with this.
+/// `inf` is a value the dump uses (`Vector2(inf, inf)`) and Rust's float parser accepts it, so
+/// it comes back as an infinity rather than as a parse failure.
+pub fn parse_call_args(name: &str, raw: &str) -> Option<Vec<f64>> {
     let inner = raw
         .strip_prefix(name)?
         .trim()

@@ -23,6 +23,22 @@ pub struct BuiltinClass {
     pub methods: Vec<BuiltinMethod>,
     #[serde(default)]
     pub enums: Vec<ClassEnum>,
+    #[serde(default)]
+    pub constants: Vec<BuiltinConstant>,
+}
+
+/// A constant the dump lists on a builtin type, such as `Vector2.LEFT`.
+#[derive(Deserialize)]
+pub struct BuiltinConstant {
+    pub name: String,
+    /// The constructor call the engine documents, e.g. `Vector2(0, 0)`.
+    pub value: String,
+    #[serde(rename = "type")]
+    pub type_: String,
+    /// Godot's own prose, in BBCode. These constants have no other documentation on the Rust
+    /// side, so it is carried through the same way the utility functions' is.
+    #[serde(default)]
+    pub description: String,
 }
 
 /// Builtin methods differ from class methods: the return type is a bare string rather than a

@@ -130,6 +130,14 @@ flat_builtin!(
 );
 
 flat_builtin!(
+    /// A 4D vector of 32-bit integers.
+    Vector4i,
+    GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_VECTOR4I,
+    SIZE_VECTOR4I,
+    { x: i32, y: i32, z: i32, w: i32 }
+);
+
+flat_builtin!(
     /// An RGBA color. Always four 32-bit floats, regardless of the engine's `real_t`.
     Color,
     GDExtensionVariantType_GDEXTENSION_VARIANT_TYPE_COLOR,
@@ -238,10 +246,10 @@ const _: () = {
     assert!(std::mem::offset_of!(Projection, w) == 3 * std::mem::size_of::<Vector4>());
 };
 
-impl Vector2 {
-    pub const ZERO: Self = Self::new(0.0, 0.0);
-    pub const ONE: Self = Self::new(1.0, 1.0);
+// The constants of these types (`ZERO`, `LEFT`, `IDENTITY`, the named colours, ...) are generated
+// from the API dump, so they are not repeated here.
 
+impl Vector2 {
     pub fn length(self) -> Real {
         (self.x * self.x + self.y * self.y).sqrt()
     }
@@ -262,9 +270,6 @@ impl Vector2 {
 }
 
 impl Vector3 {
-    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0);
-    pub const ONE: Self = Self::new(1.0, 1.0, 1.0);
-
     pub fn length(self) -> Real {
         (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
     }
@@ -289,11 +294,6 @@ impl Vector3 {
             Self::new(self.x / len, self.y / len, self.z / len)
         }
     }
-}
-
-impl Color {
-    pub const WHITE: Self = Self::new(1.0, 1.0, 1.0, 1.0);
-    pub const BLACK: Self = Self::new(0.0, 0.0, 0.0, 1.0);
 }
 
 /// Component-wise arithmetic, the operations game code reaches for constantly.
@@ -334,35 +334,13 @@ impl_vector_ops!(Vector3, Real, { x, y, z });
 impl_vector_ops!(Vector4, Real, { x, y, z, w });
 impl_vector_ops!(Vector2i, i32, { x, y });
 impl_vector_ops!(Vector3i, i32, { x, y, z });
-
-impl Transform2D {
-    /// The transform that changes nothing.
-    pub const IDENTITY: Self = Self::new(
-        Vector2::new(1.0, 0.0),
-        Vector2::new(0.0, 1.0),
-        Vector2::ZERO,
-    );
-}
-
-impl Basis {
-    pub const IDENTITY: Self = Self::new(
-        Vector3::new(1.0, 0.0, 0.0),
-        Vector3::new(0.0, 1.0, 0.0),
-        Vector3::new(0.0, 0.0, 1.0),
-    );
-}
-
-impl Transform3D {
-    pub const IDENTITY: Self = Self::new(Basis::IDENTITY, Vector3::ZERO);
-}
-
-impl Quaternion {
-    /// The rotation that changes nothing.
-    pub const IDENTITY: Self = Self::new(0.0, 0.0, 0.0, 1.0);
-}
+impl_vector_ops!(Vector4i, i32, { x, y, z, w });
 
 impl Rid {
     /// The invalid handle, which every server rejects.
+    ///
+    /// Hand-written: the API dump lists no constants for `RID`, so the generator has none to
+    /// emit.
     pub const INVALID: Self = Self::new(0);
 
     pub fn is_valid(self) -> bool {

@@ -16,7 +16,7 @@ pub use collection::{
 };
 pub use math::{
     Basis, Color, Plane, Projection, Quaternion, Real, Rect2, Rect2i, Rid, Transform2D,
-    Transform3D, Vector2, Vector2i, Vector3, Vector3i, Vector4, AABB,
+    Transform3D, Vector2, Vector2i, Vector3, Vector3i, Vector4, Vector4i, AABB,
 };
 pub use string::GString;
 pub use string_name::StringName;

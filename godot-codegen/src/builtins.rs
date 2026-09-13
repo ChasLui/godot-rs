@@ -6,7 +6,7 @@
 //! which is inlined in Rust rather than dispatched through the engine on every call.
 
 use crate::api::Api;
-use crate::types::{map_type, rust_safe_name, RustTy};
+use crate::types::{map_type, parse_call_args, rust_safe_name, RustTy};
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
@@ -67,6 +67,11 @@ const BUILTINS: &[BuiltinType] = &[
         godot: "Vector4",
         rust: "Vector4",
         tag: "VECTOR4",
+    },
+    BuiltinType {
+        godot: "Vector4i",
+        rust: "Vector4i",
+        tag: "VECTOR4I",
     },
     BuiltinType {
         godot: "Color",
@@ -201,10 +206,157 @@ fn is_hand_written(godot_type: &str, method: &str) -> bool {
     }
 }
 
+/// One argument of a builtin's constructor.
+///
+/// A constant's value is a flat list of scalars in memory order -- `Basis(1, 0, 0, 0, 1, 0, 0, 0,
+/// 1)` is three `Vector3`s -- so filling the Rust struct needs to know where the nesting is. The
+/// dump's own `members` cannot say: `Plane` lists `x`, `y`, `z`, `d` *and* `normal`, which overlap,
+/// and `Transform3D`'s `basis` hides a second level of nesting behind a single member.
+#[derive(Clone, Copy)]
+enum Field {
+    /// Follows the engine's `real_t`, so the literal is emitted unsuffixed and infers to whichever
+    /// width the `double-precision` feature selected.
+    Real,
+    /// 32 bits whatever `real_t` is -- only `Color`.
+    F32,
+    Int,
+    /// A nested builtin, built from as many scalars as its own fields consume.
+    Nested(&'static str, &'static [Field]),
+}
+
+const VECTOR2: &[Field] = &[Field::Real; 2];
+const VECTOR3: &[Field] = &[Field::Real; 3];
+const VECTOR4: &[Field] = &[Field::Real; 4];
+const BASIS: &[Field] = &[Field::Nested("Vector3", VECTOR3); 3];
+
+/// The constructor shape of the builtins that have constants.
+///
+/// Anything absent has no constants in the dump today; adding one there without adding it here
+/// drops the constant and counts it as skipped, rather than filling the fields by guesswork.
+fn constructor_shape(rust: &str) -> Option<&'static [Field]> {
+    Some(match rust {
+        "Vector2" => VECTOR2,
+        "Vector2i" => &[Field::Int; 2],
+        "Vector3" => VECTOR3,
+        "Vector3i" => &[Field::Int; 3],
+        "Vector4" | "Quaternion" => VECTOR4,
+        "Vector4i" => &[Field::Int; 4],
+        "Color" => &[Field::F32; 4],
+        "Plane" => &[Field::Nested("Vector3", VECTOR3), Field::Real],
+        "Transform2D" => &[Field::Nested("Vector2", VECTOR2); 3],
+        "Basis" => BASIS,
+        "Transform3D" => &[
+            Field::Nested("Basis", BASIS),
+            Field::Nested("Vector3", VECTOR3),
+        ],
+        "Projection" => &[Field::Nested("Vector4", VECTOR4); 4],
+        _ => return None,
+    })
+}
+
+/// Emits `Type::new(...)`, taking the scalars in the order the engine laid them out.
+fn constant_expr(
+    rust_ty: &str,
+    fields: &[Field],
+    scalars: &mut impl Iterator<Item = f64>,
+) -> Option<TokenStream> {
+    let mut args = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        args.push(match field {
+            Field::Nested(name, nested) => constant_expr(name, nested, scalars)?,
+            Field::Real => float_literal(scalars.next()?, quote!(crate::builtin::Real))?,
+            Field::F32 => float_literal(scalars.next()?, quote!(f32))?,
+            Field::Int => {
+                let value = scalars.next()?;
+                if !value.is_finite() {
+                    return None;
+                }
+                let value = value as i32;
+                quote!(#value)
+            }
+        });
+    }
+
+    let ident = format_ident!("{}", rust_ty);
+    Some(quote!(crate::builtin::#ident::new(#(#args),*)))
+}
+
+/// A float as a Rust literal of no particular width.
+///
+/// `inf` is a value the dump writes (`Vector2(inf, inf)`), and it has no literal form, so it is
+/// spelled as the associated constant instead. Everything else is emitted unsuffixed, so the one
+/// generated file compiles whether `real_t` is `f32` or `f64`.
+fn float_literal(value: f64, ty: TokenStream) -> Option<TokenStream> {
+    if value.is_nan() {
+        return None;
+    }
+    if value.is_infinite() {
+        return Some(if value.is_sign_negative() {
+            quote!(#ty::NEG_INFINITY)
+        } else {
+            quote!(#ty::INFINITY)
+        });
+    }
+
+    let literal = proc_macro2::Literal::f64_unsuffixed(value);
+    Some(quote!(#literal))
+}
+
+/// Emits the `pub const`s of one builtin, returning `(tokens, generated, skipped)`.
+fn generate_constants(
+    rust: &str,
+    constants: &[crate::api::BuiltinConstant],
+) -> (TokenStream, usize, usize) {
+    let Some(shape) = constructor_shape(rust) else {
+        return (TokenStream::new(), 0, constants.len());
+    };
+
+    // Deterministic order: the generated file must not churn between builds, whatever order the
+    // dump happens to list these in.
+    let mut ordered: Vec<&crate::api::BuiltinConstant> = constants.iter().collect();
+    ordered.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+
+    let mut out = TokenStream::new();
+    let mut generated = 0usize;
+    let mut skipped = 0usize;
+
+    for constant in ordered {
+        let Some(scalars) = parse_call_args(&constant.type_, &constant.value) else {
+            skipped += 1;
+            continue;
+        };
+
+        let mut scalars = scalars.into_iter();
+        let Some(expr) = constant_expr(rust, shape, &mut scalars) else {
+            skipped += 1;
+            continue;
+        };
+        // A value with scalars to spare was grouped wrongly, and the fields that did get filled
+        // would be filled with the wrong numbers.
+        if scalars.next().is_some() {
+            skipped += 1;
+            continue;
+        }
+
+        let ident = format_ident!("{}", constant.name);
+        let ty = format_ident!("{}", rust);
+        let doc = crate::markdown_safe(&constant.description);
+
+        out.extend(quote! {
+            #[doc = #doc]
+            pub const #ident: crate::builtin::#ty = #expr;
+        });
+        generated += 1;
+    }
+
+    (out, generated, skipped)
+}
 pub struct GeneratedBuiltins {
     pub code: String,
     pub type_count: usize,
     pub method_count: usize,
+    pub constant_count: usize,
     pub skipped: usize,
 }
 
@@ -221,6 +373,7 @@ pub fn generate_builtin_methods(api_json_path: &str) -> GeneratedBuiltins {
 
     let mut out = TokenStream::new();
     let mut method_count = 0usize;
+    let mut constant_count = 0usize;
     let mut skipped = 0usize;
 
     for builtin in BUILTINS {
@@ -251,12 +404,18 @@ pub fn generate_builtin_methods(api_json_path: &str) -> GeneratedBuiltins {
             }
         }
 
+        let (constants, generated, skipped_constants) =
+            generate_constants(builtin.rust, &class.constants);
+        constant_count += generated;
+        skipped += skipped_constants;
+
         out.extend(quote! {
             // Argument counts and names come from the engine's signatures, so neither the
             // arity nor the casing is this generator's to fix.
             #[allow(clippy::too_many_arguments)]
             #[allow(non_snake_case)]
             impl #rust_ident {
+                #constants
                 #methods
             }
         });
@@ -273,6 +432,7 @@ pub fn generate_builtin_methods(api_json_path: &str) -> GeneratedBuiltins {
         code: code.to_string(),
         type_count: BUILTINS.len(),
         method_count,
+        constant_count,
         skipped,
     }
 }
