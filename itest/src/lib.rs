@@ -339,6 +339,7 @@ struct RustTestNode {
     notifications: Vec<i32>,
     dynamic_sink: i64,
     panic_in_virtual: bool,
+    readonly_marker: i64,
     key_input_calls: i64,
     ready_calls: i64,
     process_calls: i64,
@@ -364,6 +365,7 @@ impl RustTestNode {
             notifications: Vec::new(),
             dynamic_sink: 0,
             panic_in_virtual: false,
+            readonly_marker: 7,
             key_input_calls: 0,
             ready_calls: 0,
             process_calls: 0,
@@ -385,6 +387,13 @@ impl RustTestNode {
     /// argument declares its class, so the connection dialog and `get_signal_list` show it.
     #[signal]
     fn target_changed(node: Gd<classes::Node>, label: GString) {}
+
+    /// A property with no setter at all. Godot takes an empty setter name to mean read-only, so
+    /// the inspector shows the value greyed out and a write is refused rather than dropped.
+    #[prop]
+    fn get_readonly_marker(&mut self) -> i64 {
+        self.readonly_marker
+    }
 
     /// A float property, backed by the accessor pair below. The hint is what makes the
     /// inspector draw a slider instead of a spin box -- GDScript spells it `@export_range`.

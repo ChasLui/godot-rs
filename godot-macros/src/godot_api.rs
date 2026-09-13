@@ -40,10 +40,10 @@ pub fn expand(attr: TokenStream, item: TokenStream) -> syn::Result<TokenStream> 
             has_on_recreated = true;
         }
 
-        let is_func = take_attr(method, "func");
-        let is_virtual = take_attr(method, "godot_virtual");
+        let is_func = take_attr(method, "func")?;
+        let is_virtual = take_attr(method, "godot_virtual")?;
 
-        if take_attr(method, "signal") {
+        if take_attr(method, "signal")? {
             signals.push(parse_signal(method)?);
             continue;
         }
@@ -424,10 +424,25 @@ fn type_name(ty: &syn::Type) -> syn::Result<String> {
 }
 
 /// Removes `#[name]` from the method if present, reporting whether it was there.
-fn take_attr(method: &mut ImplItemFn, name: &str) -> bool {
-    let before = method.attrs.len();
+///
+/// None of these attributes take arguments, and any that were given used to be dropped along with
+/// the attribute. That is the worst of the three outcomes: `#[func(name = "other")]` compiled,
+/// exported the method, and kept the Rust name -- the one thing the argument was written to
+/// change -- with nothing said about it. Refusing it at least says so.
+fn take_attr(method: &mut ImplItemFn, name: &str) -> syn::Result<bool> {
+    let Some(attr) = method.attrs.iter().find(|a| a.path().is_ident(name)) else {
+        return Ok(false);
+    };
+
+    if !matches!(attr.meta, syn::Meta::Path(_)) {
+        return Err(syn::Error::new(
+            attr.span(),
+            format!("#[{name}] takes no arguments"),
+        ));
+    }
+
     method.attrs.retain(|a| !a.path().is_ident(name));
-    method.attrs.len() != before
+    Ok(true)
 }
 
 struct Exported {
@@ -742,8 +757,12 @@ fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
     };
 
     let attr = method.attrs.remove(pos);
-    let entries =
-        attr.parse_args_with(Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated)?;
+    // A bare `#[prop]` has no parentheses to parse; it is the read-only form.
+    let entries = if matches!(attr.meta, syn::Meta::Path(_)) {
+        Punctuated::new()
+    } else {
+        attr.parse_args_with(Punctuated::<syn::MetaNameValue, syn::Token![,]>::parse_terminated)?
+    };
 
     let mut setter = None;
     let mut hint = None;
@@ -819,9 +838,10 @@ fn take_prop_attr(method: &mut ImplItemFn) -> syn::Result<Option<PropAttr>> {
         }
     }
 
-    let setter = setter.ok_or_else(|| {
-        syn::Error::new(attr.span(), "#[prop] needs a setter: #[prop(set = method)]")
-    })?;
+    // No setter is a read-only property, which Godot spells as an empty setter name: the
+    // inspector shows the value and will not let it be edited, and GDScript assigning to it is
+    // an error rather than a write that goes nowhere.
+    let setter = setter.unwrap_or_default();
 
     if hint.is_none() && !hint_string.is_empty() {
         return Err(syn::Error::new(

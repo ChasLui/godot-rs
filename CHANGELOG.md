@@ -17,7 +17,8 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
 - `godot-core`: `Variant`, builtin types, `Gd<T>` with reference counting, class registration,
   `ptrcall`/varcall, and `Base<T>`, the handle a class uses to act on the object it is attached
   to -- previously a raw `GDExtensionObjectPtr` field every class had to keep and wrap by hand
-- `godot-macros`: `#[godot_api]` with `#[func]`, `#[prop]`, `#[signal]`, `#[godot_virtual]`
+- `godot-macros`: `#[godot_api]` with `#[func]`, `#[prop]`, `#[signal]`, `#[godot_virtual]`.
+  A `#[prop]` with no setter is read-only: the inspector shows it and a write is refused
 - `godot-async`: frame-driven executor
 - `itest`: integration tests that run inside a real Godot instance
 
@@ -44,6 +45,10 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   every builtin since the ptrcall marshalling was written, but the incoming one stopped at six
   types, so a virtual taking a `PackedStringArray`, a `Callable` or a `TypedArray` did not
   compile.
+- `#[func(name = "other")]` no longer compiles to nothing. The argument was dropped along with
+  the attribute, leaving the method exported under its Rust name -- the one thing the argument
+  was written to change -- with nothing said about it. None of these attributes take arguments,
+  and now they say so.
 
 ### Removed
 

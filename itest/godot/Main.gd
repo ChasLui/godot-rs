@@ -16,7 +16,7 @@ const EXPECTED_TESTS := [
 	"panic_is_contained", "previously_untested_apis",
 	"reference_counting", "properties", "signals", "rust_side_connect", "init_levels",
 	"math_builtins", "collections", "instance_state", "virtuals",
-	"refcounted_class", "base_object",
+	"refcounted_class", "base_object", "readonly_property",
 	"utility_functions", "packed_arrays", "math_types", "virtual_panic", "drop_panic",
 ]
 
@@ -50,6 +50,7 @@ func _ready() -> void:
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
 	test_drop_panic()
 	test_base_object()
+	test_readonly_property()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
 	call_deferred("start_virtual_test")
 	return
@@ -190,6 +191,34 @@ func test_refcounted_class() -> void:
 			obj.free()
 
 	done("refcounted_class")
+
+func test_readonly_property() -> void:
+	# A #[prop] with no setter. Godot spells read-only as an empty setter name, so the point of
+	# this test is that the engine actually honours that rather than registering something that
+	# silently accepts writes.
+	var n: Object = ClassDB.instantiate("RustTestNode")
+	check(n != null, "could not instantiate RustTestNode")
+	if n == null:
+		return
+
+	check(n.readonly_marker == 7, "the read-only property read %s, expected 7" % n.readonly_marker)
+
+	# `set()` rather than an assignment: assigning to a property Godot refuses is a runtime
+	# error, which would abort this function instead of failing it -- and a function that aborts
+	# reports nothing at all.
+	n.set("readonly_marker", 99)
+	check(n.readonly_marker == 7,
+		"writing a read-only property changed it to %s" % n.readonly_marker)
+
+	# It still has to be a property, not just a method: the inspector reads this list.
+	var listed := false
+	for entry in n.get_property_list():
+		if entry.name == "readonly_marker":
+			listed = true
+	check(listed, "the read-only property is not in the property list")
+
+	n.free()
+	done("readonly_property")
 
 func test_base_object() -> void:
 	# The base handle must name *this* object. Every other test would pass just as well if it
