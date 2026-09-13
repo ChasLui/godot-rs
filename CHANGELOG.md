@@ -40,6 +40,11 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   refused at registration. The base was only ever a name, so the two could disagree and the class
   would call one class's methods on an object the engine built as another.
 
+- A `#[godot_virtual]` method can take the container builtins. The outgoing direction has had
+  every builtin since the ptrcall marshalling was written, but the incoming one stopped at six
+  types, so a virtual taking a `PackedStringArray`, a `Callable` or a `TypedArray` did not
+  compile.
+
 ### Removed
 
 - Everything targeting Godot 3: `gdnative*` crates, `bindings-generator`, the Godot 3 examples

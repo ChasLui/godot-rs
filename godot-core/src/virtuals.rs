@@ -73,7 +73,26 @@ impl_from_arg_cloned!(
     crate::builtin::Variant,
     crate::builtin::VariantArray,
     crate::builtin::Dictionary,
+    crate::builtin::Callable,
+    crate::builtin::Signal,
+    crate::builtin::PackedByteArray,
+    crate::builtin::PackedInt32Array,
+    crate::builtin::PackedInt64Array,
+    crate::builtin::PackedFloat32Array,
+    crate::builtin::PackedFloat64Array,
+    crate::builtin::PackedStringArray,
+    crate::builtin::PackedVector2Array,
+    crate::builtin::PackedVector3Array,
+    crate::builtin::PackedVector4Array,
+    crate::builtin::PackedColorArray,
 );
+
+// `TypedArray` is generic, so the macro above cannot reach it, but it reads out the same way.
+unsafe impl<T: crate::builtin::ArrayElement> FromPtrcallArg for crate::builtin::TypedArray<T> {
+    unsafe fn from_arg(ptr: sys::GDExtensionConstTypePtr) -> Self {
+        (*(ptr as *const Self)).clone()
+    }
+}
 
 // The flat maths types are Copy, so reading them out is a plain load.
 impl_from_arg_direct!(
@@ -183,4 +202,39 @@ pub(crate) unsafe extern "C" fn call_virtual_with_data(
         (),
         || trampoline(instance, args, ret),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `FromPtrcallArg` is what makes a type usable as a `#[godot_virtual]` argument. The outgoing
+    /// direction has had every builtin since the ptrcall marshalling was written; this is the
+    /// incoming one catching up, and the engine virtuals that take these live on the editor and
+    /// server extension classes, which a headless run cannot reach. So the assertion is that it
+    /// compiles: drop one of the impls and this stops building.
+    #[test]
+    fn every_container_builtin_can_arrive_as_a_virtual_argument() {
+        fn accepts<T: FromPtrcallArg>() {}
+
+        accepts::<crate::builtin::PackedByteArray>();
+        accepts::<crate::builtin::PackedInt32Array>();
+        accepts::<crate::builtin::PackedInt64Array>();
+        accepts::<crate::builtin::PackedFloat32Array>();
+        accepts::<crate::builtin::PackedFloat64Array>();
+        accepts::<crate::builtin::PackedStringArray>();
+        accepts::<crate::builtin::PackedVector2Array>();
+        accepts::<crate::builtin::PackedVector3Array>();
+        accepts::<crate::builtin::PackedVector4Array>();
+        accepts::<crate::builtin::PackedColorArray>();
+        accepts::<crate::builtin::Callable>();
+        accepts::<crate::builtin::Signal>();
+        accepts::<crate::builtin::TypedArray<crate::builtin::GString>>();
+
+        // The ones that were already there, so a refactor cannot quietly narrow the set.
+        accepts::<crate::builtin::GString>();
+        accepts::<crate::builtin::Variant>();
+        accepts::<crate::builtin::VariantArray>();
+        accepts::<crate::builtin::Dictionary>();
+    }
 }
