@@ -21,6 +21,13 @@ use std::collections::HashSet;
 /// All of them are still generated -- a binding with holes in it sends people looking for the
 /// hole rather than for the faster call -- but their documentation says so, the way
 /// `builtins.rs` refuses to generate `Vector2::length` at all for the same reason.
+/// Variadic utility functions that still need a minimum number of arguments.
+///
+/// The dump names each variadic's leading arguments but not how many the engine insists on, and
+/// the two differ: `print` names one and accepts none, `max` names two and rejects fewer. Checked
+/// against `core/variant/variant_utility.cpp`, where these three set `CALL_ERROR_TOO_FEW_ARGUMENTS`.
+const VARARG_MINIMUM: &[(&str, usize)] = &[("max", 2), ("min", 2), ("str", 1)];
+
 const HAS_RUST_EQUIVALENT: &[&str] = &[
     "abs",
     "absf",
@@ -59,8 +66,8 @@ const HAS_RUST_EQUIVALENT: &[&str] = &[
     "round",
     "roundf",
     "roundi",
-    "sign",
-    "signf",
+    // Not `sign` or `signf`: Godot's is 0 at zero, while `f64::signum` gives 1 for +0.0 and -1
+    // for -0.0. The integer form has no signed zero, so `i64::signum` is the same function.
     "signi",
     "sin",
     "sinh",
@@ -221,13 +228,28 @@ fn utility_doc(func: &UtilityFunction) -> String {
             .iter()
             .map(|arg| format!("`{}`", arg.name))
             .collect();
+        let minimum = VARARG_MINIMUM
+            .iter()
+            .find(|(name, _)| *name == func.name)
+            .map_or(0, |(_, count)| *count);
+        let requirement = if minimum == 0 {
+            format!(
+                "but they are as optional as the rest -- `{}()` with nothing at all is valid \
+                 GDScript",
+                func.name
+            )
+        } else {
+            format!(
+                "and the engine requires at least {minimum}. A slice cannot enforce that: fewer is \
+                 reported on Godot's console and the result is empty"
+            )
+        };
         doc.push_str(&format!(
-            "\n\n# Arguments\nGodot names the first {} argument(s) ({}), but they are as optional \
-             as the rest -- `{}()` with nothing at all is valid GDScript. They are therefore part \
-             of `varargs` here rather than separate parameters.",
+            "\n\n# Arguments\nGodot names the first {} argument(s) ({}), {requirement}. They are \
+             part of `varargs` here rather than separate parameters, so that every function in \
+             this family is called the same way.",
             named.len(),
             named.join(", "),
-            func.name,
         ));
     }
 
