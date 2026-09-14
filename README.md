@@ -207,20 +207,23 @@ Built and covered by the integration tests:
   inspector shows a typed slot and the connection dialog shows the signal's real shape. A
   property may carry a hint and usage flags -- `#[prop(set = ..., hint = PROPERTY_HINT_RANGE,
   hint_string = "0,100")]` is GDScript's `@export_range(0, 100)`, and
-  `usage = PROPERTY_USAGE_NONE` is a value that exists at runtime without being saved or shown
+  `usage = PROPERTY_USAGE_NONE` is a value that exists at runtime without being saved or shown.
+  A `#[prop]` with no `set` is read-only: the inspector shows it and a write is refused
 - Any engine virtual can be overridden -- `_ready`, `_process`, `_input`, `_enter_tree`,
   `_to_string`, `_notification`, `_get`/`_set`/`_get_property_list`, ... -- by declaring a
   `#[godot_virtual]` method
   whose Rust name is the Godot one without its leading underscore
 - `Variant` and the builtins:
   - strings: `GString`, `StringName`, `NodePath`
-  - math: `Vector2/3/4`, `Vector2i/3i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,
+  - math: `Vector2/3/4`, `Vector2i/3i/4i`, `Color`, `Rect2/2i`, `Transform2D/3D`, `Basis`,
     `Quaternion`, `Plane`, `AABB`, `Projection`, `Rid`
   - containers: `VariantArray`, `Dictionary`, `TypedArray<T>`, and all ten `Packed*Array` types
   - callables: `Callable`, `Signal` -- from a registered method or from a Rust closure, so
     signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
   methods read as `node.add_child(&child)` and inherited ones need no base-class name
+- `Base<T>`, a class's handle to the object it is attached to: filled in by `on_base_ready`,
+  so a class emits its own signals and calls its own engine methods without `unsafe`
 - `Gd::instance_id` / `Gd::from_instance_id` for holding an object across frames: a `Gd` to a
   freed object dangles with no way to test it, an id resolves to `None`
 - `registry::rust_instance` reaches the Rust fields behind another object's handle directly,
@@ -234,8 +237,15 @@ Built and covered by the integration tests:
   called through `ptrcall`, plus variadic methods (`emit_signal`, `call`, `rpc`) through the
   Variant path. The three methods taking a pointer into something the API description does not
   cover are generated `unsafe`.
+- All 114 of Godot's utility functions -- `lerp`, `randi`, `type_convert`, `is_instance_valid`,
+  ... -- as free functions in `godot::global`. They call the engine's own, so they share its
+  state: a seed set from GDScript governs `randi()` called from Rust
 - Generated methods on the builtin types themselves (`String::find`, `Array::sort`,
   `Vector2::clamp`, ...); the vector maths is kept as inlined Rust rather than an engine call
+- The builtins' own constants -- `Vector2::LEFT`, `Color::RED`, `Basis::IDENTITY`, all 210 of
+  them -- as compile-time values, and the engine's comparison and concatenation on the types
+  whose memory it owns: `==` on strings, containers, callables and `Variant`, `Eq` and `Hash` on
+  `GString`/`StringName`/`NodePath`, `<` on strings and arrays, and `&a + &b`
 - Engine enums and bitfields as distinct Rust types, so `connect` returns an `Error` rather
   than a bare integer
 - Default arguments: a method with defaults gets a short form taking only the required
