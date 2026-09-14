@@ -108,6 +108,14 @@ func test_hot_reload() -> void:
 	# And the object is fully usable again, not just alive.
 	check(again.echo_int(42) == 42, "the reloaded instance could not answer a method call")
 
+	# Reached from another object, through the instance binding. Reloading clears the binding,
+	# and one that is not reinstalled makes the engine build a stand-in pointing at the object
+	# itself -- which `rust_instance` would then read as the Rust state.
+	var probe: Object = ClassDB.instantiate("RustTestNode")
+	var seen: int = probe.read_other_rust_state(again)
+	check(seen == 101, "another object read %d through the reloaded instance's binding, expected 101" % seen)
+	probe.free()
+
 	again.free()
 
 	done("hot_reload")

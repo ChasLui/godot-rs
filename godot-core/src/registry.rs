@@ -299,6 +299,16 @@ unsafe extern "C" fn recreate_instance<T: GodotClass>(
         return std::ptr::null_mut();
     }
 
+    // Reloading cleared the binding along with the old state. Left unset, the next lookup would
+    // have the engine create one through `binding_create`, which hands back the object itself --
+    // and `rust_instance` would read that object as a `T`.
+    sys::interface_fn!(object_set_instance_binding)(
+        object,
+        sys::library(),
+        instance as *mut std::ffi::c_void,
+        &BINDING_CALLBACKS as *const _,
+    );
+
     instance as sys::GDExtensionClassInstancePtr
 }
 
