@@ -929,3 +929,31 @@ fn quote_urls(text: &str) -> String {
     out.push_str(rest);
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_brace_inside_a_string_is_not_structure() {
+        // Godot's prose reaches doc attributes full of `{` and `;`. Broken across lines, the
+        // literal becomes a code block rustdoc cannot parse.
+        assert_eq!(
+            syn_free_format(r#"fn f() { "{;" }"#).as_deref(),
+            Some("fn f() {\n     \"{;\" \n}\n"),
+        );
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_end_the_string() {
+        let text = r#""\"{""#;
+        assert_eq!(syn_free_format(text).as_deref(), Some(text));
+    }
+
+    #[test]
+    fn descriptions_are_made_inert_for_rustdoc() {
+        assert_eq!(markdown_safe("  [param x] <b>"), r"\[param x] \<b>");
+        // Indentation would make a Markdown code block, compiled as a doctest.
+        assert_eq!(markdown_safe("a\n    b"), "a\nb");
+    }
+}

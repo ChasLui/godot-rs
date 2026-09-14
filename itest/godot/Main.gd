@@ -68,6 +68,12 @@ func report() -> void:
 
 	if failures.is_empty():
 		print("itest: OK")
+		# Armed only on success, so it cannot hide a failure. Caught, it is one error at shutdown;
+		# uncaught, it aborts Godot and the nonzero exit code fails the run.
+		print("  (the next error is expected: a deliberate panic inside on_level_deinit)")
+		var armer: Object = ClassDB.instantiate("RustTestNode")
+		armer.arm_level_deinit_panic()
+		armer.free()
 		get_tree().quit(0)
 	else:
 		for f in failures:
@@ -591,6 +597,8 @@ func test_async() -> void:
 func test_class_registration() -> void:
 	check(ClassDB.class_exists("RustTestNode"), "ClassDB does not know RustTestNode")
 	check(ClassDB.is_parent_class("RustTestNode", "Node"), "RustTestNode does not inherit Node")
+	check(not ClassDB.class_exists("RustMismatchedBase"),
+		"a class whose BASE_NAME and Base type disagree was registered")
 	done("class_registration")
 
 func test_variant_roundtrip() -> void:

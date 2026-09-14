@@ -50,9 +50,10 @@ impl ExtensionLibrary for ItestLibrary {
                 register_class::<RustTestNode>();
                 register_class::<RustRuntimeOnlyNode>();
                 register_class::<RustTestResource>();
-                // Refused, and the refusal is the point -- see RustDerivedResource. The error
-                // it prints is expected.
+                // Both refused, and the refusal is the point -- see RustDerivedResource and
+                // RustMismatchedBase. The errors they print are expected.
                 register_class::<RustDerivedResource>();
+                register_class::<RustMismatchedBase>();
             },
             // Levels are startup phases, not modes: Godot runs the Editor level during a game
             // run too. Registering something editor-only therefore needs an explicit check.
@@ -81,6 +82,13 @@ impl ExtensionLibrary for ItestLibrary {
                 // a class that inherits it fails.
                 unregister_class::<RustDerivedResource>();
                 unregister_class::<RustTestResource>();
+                unregister_class::<RustMismatchedBase>();
+
+                // Scene is the last level this library deinitializes, so a panic here skips
+                // nothing. Left uncaught it would abort shutdown, and the exit code shows that.
+                if LEVEL_DEINIT_PANIC.load(std::sync::atomic::Ordering::Relaxed) {
+                    panic!("deliberate panic in on_level_deinit");
+                }
             },
             InitLevel::Editor if is_editor() => unsafe {
                 // Strictly the reverse of init: the editor holds a live instance, so removing
@@ -204,6 +212,10 @@ static RESOURCE_INIT_PANIC: std::sync::atomic::AtomicBool =
 static RESOURCE_BASE_READY_PANIC: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Whether `on_level_deinit` should panic once its Scene-level teardown is done.
+static LEVEL_DEINIT_PANIC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 impl Drop for RustTestResource {
     fn drop(&mut self) {
         RESOURCE_FREES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -305,11 +317,30 @@ impl GodotClass for RustDerivedResource {
     const BASE_NAME: &'static str = "RustTestResource";
 
     // No type names the intended base, so this is the nearest engine class. The class is refused
-    // over `BASE_NAME` before anything compares the two spellings.
+    // over `BASE_NAME` before anything compares the two spellings -- though the two spellings
+    // disagree here as well, so the assertion holds while either check does. RustMismatchedBase
+    // is what pins the second one down.
     type Base = classes::Resource;
 
     fn init() -> Self {
         Self { extra: 42 }
+    }
+}
+
+/// An engine base named one way as a string and another as a type.
+///
+/// `#[godot_api]` derives both from its one `base = X`, so only a hand-written impl can disagree
+/// with itself. The engine would build a Node while the class's `Base` type offered Resource's
+/// methods; registration must refuse it.
+struct RustMismatchedBase;
+
+impl GodotClass for RustMismatchedBase {
+    const CLASS_NAME: &'static str = "RustMismatchedBase";
+    const BASE_NAME: &'static str = "Node";
+    type Base = classes::Resource;
+
+    fn init() -> Self {
+        Self
     }
 }
 
@@ -691,6 +722,12 @@ impl RustTestNode {
     #[func]
     fn arm_resource_base_ready_panic(&mut self) {
         RESOURCE_BASE_READY_PANIC.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Makes `on_level_deinit` panic at shutdown, after it has unregistered everything.
+    #[func]
+    fn arm_level_deinit_panic(&mut self) {
+        LEVEL_DEINIT_PANIC.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// How many times the engine has called `_unhandled_key_input` on this instance.
