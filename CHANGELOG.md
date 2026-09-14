@@ -46,6 +46,10 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   `InputEvent` was destroyed the moment `_input` returned, while the engine was still using it.
   Nothing caught it because a headless run has no input device, so the virtual had never once
   been called; the test that now covers it pushes an event of its own.
+- `registry::rust_instance` reads the right state after a hot reload. Reloading clears each
+  object's instance binding along with its Rust state, and the rebuilt state was never bound
+  again, so the next lookup had the engine make the object itself the binding -- and the object
+  was read as the Rust struct.
 - A hand-written `GodotClass` whose `BASE_NAME` and `type Base` name different classes is refused
   at registration. The base was only ever a name, so the two could disagree and the class would
   call one class's methods on an object the engine built as another. `#[godot_api]` derives both

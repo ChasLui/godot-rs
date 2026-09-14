@@ -84,8 +84,9 @@ impl ExtensionLibrary for ItestLibrary {
                 unregister_class::<RustTestResource>();
                 unregister_class::<RustMismatchedBase>();
 
-                // Scene is the last level this library deinitializes, so a panic here skips
-                // nothing. Left uncaught it would abort shutdown, and the exit code shows that.
+                // The last statement of the Scene arm, so a panic here skips nothing: Servers and
+                // Core follow as separate callbacks, each caught on its own. Left uncaught it would
+                // abort shutdown, and the exit code shows that.
                 if LEVEL_DEINIT_PANIC.load(std::sync::atomic::Ordering::Relaxed) {
                     panic!("deliberate panic in on_level_deinit");
                 }

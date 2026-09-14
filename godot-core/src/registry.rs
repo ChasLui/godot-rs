@@ -125,8 +125,13 @@ struct ClassUserdata {
 /// Instance binding callbacks.
 ///
 /// Godot uses these to associate an engine object with language-side data. For an extension
-/// class the binding is our own instance pointer, so creation is a passthrough and there is
-/// nothing extra to free -- `free_instance_func` already owns that lifetime.
+/// class the binding is our own instance pointer, set explicitly by `create_instance` and
+/// `recreate_instance`, and there is nothing extra to free -- `free_instance_func` already owns
+/// that lifetime.
+///
+/// `binding_create` only runs when a lookup finds no binding, and what it is handed is the
+/// *object*, not an instance: returning it makes the object itself the binding. That is never
+/// right for a Rust class, which is why both instance callbacks set the binding themselves.
 unsafe extern "C" fn binding_create(
     _token: *mut std::ffi::c_void,
     instance: *mut std::ffi::c_void,

@@ -269,10 +269,11 @@ fn utility_doc(func: &UtilityFunction) -> String {
     // of them take Variant arguments.
     if func.arguments.iter().any(|arg| arg.type_ == "Variant") {
         doc.push_str(
-            "\n\n# Errors\nArguments are checked by the engine, not here. A mistyped or missing \
-             one is reported on Godot's own console and yields a nil `Variant`: the ptrcall path \
-             discards the call-error code, so unlike the variadic *class* methods this returns no \
-             `Result` to test.",
+            "\n\n# Errors\nArguments are checked by the engine, not here, and a mistyped or \
+             missing one is not reported at all: the ptrcall path discards the call-error code. \
+             The result is whatever the engine returns on failure -- usually a nil `Variant`, for \
+             some functions an error message -- so unlike the variadic *class* methods there is \
+             no `Result` to test.",
         );
     }
 
