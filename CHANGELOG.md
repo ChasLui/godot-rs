@@ -46,9 +46,11 @@ The last Godot 3 release is tagged `gdnative-final-0.11.3`, and its changelog is
   `InputEvent` was destroyed the moment `_input` returned, while the engine was still using it.
   Nothing caught it because a headless run has no input device, so the virtual had never once
   been called; the test that now covers it pushes an event of its own.
-- A class whose `Base<T>` field names a different class than its `#[godot_api(base = ...)]` is
-  refused at registration. The base was only ever a name, so the two could disagree and the class
-  would call one class's methods on an object the engine built as another.
+- A hand-written `GodotClass` whose `BASE_NAME` and `type Base` name different classes is refused
+  at registration. The base was only ever a name, so the two could disagree and the class would
+  call one class's methods on an object the engine built as another. `#[godot_api]` derives both
+  from the one `base = X`; the class a `Base<T>` field names is still the caller's to get right,
+  under `Base::new`'s safety contract.
 
 - A `#[godot_virtual]` method can take the container builtins. The outgoing direction has had
   every builtin since the ptrcall marshalling was written, but the incoming one stopped at six

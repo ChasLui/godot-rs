@@ -18,9 +18,11 @@ pub trait GodotClass: Sized + 'static {
     ///
     /// [`Self::BASE_NAME`] is a string, so nothing checks it until the engine rejects it at
     /// runtime -- if it rejects it at all. This is the type the compiler can see, and it is what
-    /// a [`Base<Self::Base>`](crate::obj::Base) field is declared with, so a class reaches its
-    /// own engine methods through the class it actually inherits. [`register_class`] refuses a
-    /// class whose two spellings disagree.
+    /// a [`Base<Self::Base>`](crate::obj::Base) field should be declared with, so a class reaches
+    /// its own engine methods through the class it actually inherits. [`register_class`] refuses
+    /// a class whose two spellings disagree. Nothing ties the field to this type, though: that
+    /// the field names the right class is part of what [`Base::new`](crate::obj::Base::new)'s
+    /// safety contract asks of its caller.
     type Base: crate::obj::GodotObject;
 
     /// Every virtual this class overrides, spelled the way the engine spells it (`_ready`).
@@ -144,7 +146,9 @@ unsafe extern "C" fn binding_reference(
     _binding: *mut std::ffi::c_void,
     _reference: sys::GDExtensionBool,
 ) -> sys::GDExtensionBool {
-    // Returning true means "keep the object alive"; refcount handling proper arrives with Gd<T>.
+    // Returning true means "this binding does not keep the object alive": the engine only lets a
+    // refcounted object die when every binding agrees, and consults the answer on unreference
+    // alone. Nothing here needs a say -- a `Gd` holds a real reference count, and `Base` none.
     true as sys::GDExtensionBool
 }
 
@@ -750,9 +754,10 @@ fn base_is_registerable<T: GodotClass>() -> bool {
 ///
 /// `#[godot_api]` fills both spellings in from the one `base = X`, so a mismatch can only come
 /// from a hand-written impl -- and it has to be refused rather than picked between. `BASE_NAME`
-/// decides what the engine builds, while [`GodotClass::Base`] decides which methods the class's
-/// own [`Base`](crate::obj::Base) field offers: disagreeing means calling Sprite2D's methods on
-/// an object the engine made a Node.
+/// decides what the engine builds, while [`GodotClass::Base`] decides which methods a
+/// [`Base<T::Base>`](crate::obj::Base) field offers: disagreeing means calling Sprite2D's
+/// methods on an object the engine made a Node. The field's own type argument is not checked
+/// here, or anywhere -- nothing can see it.
 fn base_type_matches<T: GodotClass>() -> bool {
     let as_type = <T::Base as crate::obj::GodotObject>::CLASS_NAME;
     if as_type != T::BASE_NAME {

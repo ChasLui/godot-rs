@@ -222,8 +222,9 @@ Built and covered by the integration tests:
     signals can be connected from Rust, not only GDScript
 - `Gd<T>` object handles with automatic reference counting, dereferencing to the class so
   methods read as `node.add_child(&child)` and inherited ones need no base-class name
-- `Base<T>`, a class's handle to the object it is attached to: filled in by `on_base_ready`,
-  so a class emits its own signals and calls its own engine methods without `unsafe`
+- `Base<T>`, a class's handle to the object it is attached to, so a class emits its own signals
+  and calls its own engine methods without `unsafe`. Filling it in, once in `on_base_ready`, is
+  the one `unsafe` step, and it must not be used from `Drop`
 - `Gd::instance_id` / `Gd::from_instance_id` for holding an object across frames: a `Gd` to a
   freed object dangles with no way to test it, an id resolves to `None`
 - `registry::rust_instance` reaches the Rust fields behind another object's handle directly,
