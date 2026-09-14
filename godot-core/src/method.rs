@@ -205,9 +205,11 @@ unsafe extern "C" fn method_ptrcall<T: GodotClass>(
     // engine is actually passing, and converting the return value trusts the same thing in
     // reverse. Both panic when they disagree, and both sit outside the user's code.
     //
-    // Leaving the return slot untouched after a panic is safe here, unlike on the varcall path:
-    // the engine default-constructs it before the call, so the caller reads that default rather
-    // than uninitialized memory.
+    // Leaving the return slot untouched after a panic is safe on the path GDScript takes, unlike on
+    // the varcall path: `GDExtensionMethodBind::validated_call` default-constructs the slot before
+    // calling in, so the caller reads that default rather than uninitialized memory. The engine's
+    // raw `MethodBind::ptrcall` does not -- it forwards whatever slot its caller allocated. Only the
+    // C# glue calls that today, but a caller that does reads an unwritten slot after a panic.
     crate::panics::catch(
         || format!("{}::{}", T::CLASS_NAME, userdata.name),
         (),
