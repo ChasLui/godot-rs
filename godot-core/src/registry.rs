@@ -181,9 +181,14 @@ unsafe extern "C" fn create_instance<T: GodotClass>(
         || Some(Box::into_raw(Box::new(T::init()))),
     ) {
         Some(ptr) => ptr,
-        // Without Rust state the object would fault on its first call; better an object the
-        // engine reports as missing than one that crashes later.
-        None => return std::ptr::null_mut(),
+        // Without Rust state the object would fault on its first call, so the engine is told
+        // instantiation failed. The base object is still ours to release: the engine hands a null
+        // result straight back to its caller without cleaning anything up, so returning without
+        // this would leak one native object for every failed `new()`.
+        None => {
+            sys::interface_fn!(object_destroy)(object);
+            return std::ptr::null_mut();
+        }
     };
 
     // Give the instance its own object before anything can call into it. Caught separately from
@@ -199,6 +204,9 @@ unsafe extern "C" fn create_instance<T: GodotClass>(
     );
     if !ready {
         drop(Box::from_raw(instance));
+        // The state was never attached to the object, so destroying it cannot reach back into
+        // what was just dropped. Same leak as above otherwise.
+        sys::interface_fn!(object_destroy)(object);
         return std::ptr::null_mut();
     }
 

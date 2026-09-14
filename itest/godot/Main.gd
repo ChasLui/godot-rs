@@ -18,7 +18,7 @@ const EXPECTED_TESTS := [
 	"math_builtins", "collections", "instance_state", "virtuals",
 	"refcounted_class", "base_object", "readonly_property",
 	"utility_functions", "packed_arrays", "math_types", "builtin_constants",
-	"virtual_panic", "drop_panic", "builtin_operators",
+	"virtual_panic", "drop_panic", "init_panic", "builtin_operators",
 ]
 
 func check(condition: bool, message: String) -> void:
@@ -52,6 +52,7 @@ func _ready() -> void:
 	test_refcounted_class()
 	# Counts destructors, so it must follow the test that asserts an exact destructor count.
 	test_drop_panic()
+	test_init_panic()
 	test_base_object()
 	test_readonly_property()
 	# Virtual hooks need real frames to fire, so that check runs after a few of them.
@@ -1271,6 +1272,37 @@ func push_key_event() -> void:
 	ev.keycode = KEY_A
 	ev.pressed = true
 	get_viewport().push_input(ev)
+
+func test_init_panic() -> void:
+	# A panic in `init` or `on_base_ready` makes instantiation fail -- but the engine built the
+	# base object before calling either, and does nothing with the null it gets back. Unless the
+	# extension destroys that object itself, every failed `new()` leaks one native object.
+	var probe: Object = ClassDB.instantiate("RustTestNode")
+	var before := Performance.get_monitor(Performance.OBJECT_COUNT)
+
+	probe.arm_resource_init_panic()
+	print("  (the next error is expected: a deliberate panic inside a Rust init)")
+	var failed_init: Object = ClassDB.instantiate("RustTestResource")
+	check(failed_init == null, "instantiation succeeded even though init panicked")
+
+	probe.arm_resource_base_ready_panic()
+	print("  (the next error is expected: a deliberate panic inside on_base_ready)")
+	var failed_ready: Object = ClassDB.instantiate("RustTestResource")
+	check(failed_ready == null, "instantiation succeeded even though on_base_ready panicked")
+
+	var after := Performance.get_monitor(Performance.OBJECT_COUNT)
+	check(after == before,
+		"failed instantiations leaked native objects: the object count went from %s to %s"
+			% [before, after])
+
+	# The class must still instantiate normally once the flags have fired.
+	var healthy: Object = ClassDB.instantiate("RustTestResource")
+	check(healthy != null and healthy.payload() == 7,
+		"RustTestResource was unusable after a failed instantiation")
+	healthy = null
+
+	probe.free()
+	done("init_panic")
 
 func test_drop_panic() -> void:
 	# A user's `Drop` runs inside the engine's free_instance callback, which is another

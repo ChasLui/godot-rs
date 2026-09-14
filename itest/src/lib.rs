@@ -196,6 +196,14 @@ static RESOURCE_FREES: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI
 static RESOURCE_DROP_PANIC: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(false);
 
+/// Whether the next `RustTestResource::init` should panic.
+static RESOURCE_INIT_PANIC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Whether the next `RustTestResource::on_base_ready` should panic.
+static RESOURCE_BASE_READY_PANIC: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
 impl Drop for RustTestResource {
     fn drop(&mut self) {
         RESOURCE_FREES.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -212,6 +220,11 @@ impl Drop for RustTestResource {
 #[godot_api(base = Resource)]
 impl RustTestResource {
     fn init() -> Self {
+        // The engine has already built the base object by the time this runs, so a panic here
+        // is the case where instantiation fails with a native object left to clean up.
+        if RESOURCE_INIT_PANIC.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            panic!("deliberate panic from init");
+        }
         Self {
             payload: 7,
             base: Base::unset(),
@@ -219,6 +232,10 @@ impl RustTestResource {
     }
 
     fn on_base_ready(&mut self, base: sys::GDExtensionObjectPtr) {
+        // The same failure one step later, with the Rust state built but not yet attached.
+        if RESOURCE_BASE_READY_PANIC.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            panic!("deliberate panic from on_base_ready");
+        }
         // SAFETY: the engine passes the object this instance was just attached to.
         self.base = unsafe { Base::new(base) };
     }
@@ -661,6 +678,19 @@ impl RustTestNode {
     #[func]
     fn arm_virtual_panic(&mut self) {
         self.panic_in_virtual = true;
+    }
+
+    /// Makes the next `RustTestResource::init` panic. On this class rather than the resource,
+    /// since the instantiation it breaks leaves no resource to call anything on.
+    #[func]
+    fn arm_resource_init_panic(&mut self) {
+        RESOURCE_INIT_PANIC.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Makes the next `RustTestResource::on_base_ready` panic.
+    #[func]
+    fn arm_resource_base_ready_panic(&mut self) {
+        RESOURCE_BASE_READY_PANIC.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// How many times the engine has called `_unhandled_key_input` on this instance.
