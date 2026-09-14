@@ -1,9 +1,10 @@
-//! Generates methods for Godot's builtin types.
+//! Generates methods and constants for Godot's builtin types.
 //!
 //! These attach to the hand-written structs in `godot-core::builtin`, so the generated code
 //! lives in that crate rather than in `godot-bindings`. Only types the crate actually defines
 //! are generated, and methods already written by hand are skipped -- notably the vector maths,
-//! which is inlined in Rust rather than dispatched through the engine on every call.
+//! which is inlined in Rust rather than dispatched through the engine on every call. Constants
+//! are skipped for a type with no known field layout to lay their values out in.
 
 use crate::api::Api;
 use crate::types::{map_type, parse_call_args, rust_safe_name, RustTy};

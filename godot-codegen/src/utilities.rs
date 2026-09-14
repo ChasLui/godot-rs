@@ -21,13 +21,6 @@ use std::collections::HashSet;
 /// All of them are still generated -- a binding with holes in it sends people looking for the
 /// hole rather than for the faster call -- but their documentation says so, the way
 /// `builtins.rs` refuses to generate `Vector2::length` at all for the same reason.
-/// Variadic utility functions that still need a minimum number of arguments.
-///
-/// The dump names each variadic's leading arguments but not how many the engine insists on, and
-/// the two differ: `print` names one and accepts none, `max` names two and rejects fewer. Checked
-/// against `core/variant/variant_utility.cpp`, where these three set `CALL_ERROR_TOO_FEW_ARGUMENTS`.
-const VARARG_MINIMUM: &[(&str, usize)] = &[("max", 2), ("min", 2), ("str", 1)];
-
 const HAS_RUST_EQUIVALENT: &[&str] = &[
     "abs",
     "absf",
@@ -75,6 +68,15 @@ const HAS_RUST_EQUIVALENT: &[&str] = &[
     "tan",
     "tanh",
 ];
+
+/// Variadic utility functions that still need a minimum number of arguments.
+///
+/// The dump names each variadic's leading arguments but not how many the engine insists on, and
+/// the two differ: `print` names one and accepts none, `max` names two and rejects fewer. Checked
+/// against `core/variant/variant_utility.cpp`, where these three enforce
+/// `CALL_ERROR_TOO_FEW_ARGUMENTS`; `push_error` and `push_warning` set it too, then overwrite it
+/// with `CALL_OK`.
+const VARARG_MINIMUM: &[(&str, usize)] = &[("max", 2), ("min", 2), ("str", 1)];
 
 /// Emits every utility function, returning `(tokens, generated, skipped)`.
 pub fn generate_utility_functions(
@@ -240,8 +242,9 @@ fn utility_doc(func: &UtilityFunction) -> String {
             )
         } else {
             format!(
-                "and the engine requires at least {minimum}. A slice cannot enforce that: fewer is \
-                 reported on Godot's console and the result is empty"
+                "and the engine requires at least {minimum}. A slice cannot enforce that: with \
+                 fewer, the result is empty and nothing reports it -- this call path discards \
+                 the engine's call error"
             )
         };
         doc.push_str(&format!(
